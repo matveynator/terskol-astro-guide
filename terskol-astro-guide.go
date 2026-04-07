@@ -19,10 +19,18 @@ import (
 	webview "github.com/webview/webview_go"
 )
 
+// =============================
+// Embedded files and flags.
+// =============================
+
 //go:embed static/*
 var embeddedFiles embed.FS
 
 var portFlag = flag.Int("port", 8765, "HTTP port")
+
+// =============================
+// State model and commands.
+// =============================
 
 type applicationState struct {
 	SocketPower string `json:"socket_power"`
@@ -37,13 +45,21 @@ type stateCommand struct {
 	reply     chan applicationState
 }
 
+// =============================
+// Application bootstrap.
+// =============================
+
 func main() {
+	// WebView on macOS is more stable when UI setup stays on the main locked thread.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	flag.Parse()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Single owner goroutine avoids shared mutable state and keeps logic explicit.
 	stateCommands := make(chan stateCommand)
 	go runStateOwner(ctx, stateCommands)
 
@@ -53,47 +69,74 @@ func main() {
 	mux.HandleFunc("/", serveEmbeddedStatic)
 
 	address := fmt.Sprintf(":%d", *portFlag)
-	go func() {
-		if err := http.ListenAndServe(address, mux); err != nil {
-			log.Printf("http server stopped: %v", err)
-		}
-	}()
-
-	if err := waitHTTPServerReady("127.0.0.1", *portFlag, 3*time.Second); err != nil {
-		log.Fatalf("http server is not ready: %v", err)
+	httpServer := &http.Server{
+		Addr:    address,
+		Handler: withRequestLogging(mux),
 	}
 
+	log.Printf("startup: preparing HTTP server on %s", address)
+	go runHTTPServer(httpServer)
+
+	if err := waitHTTPServerReady("127.0.0.1", *portFlag, 5*time.Second); err != nil {
+		log.Fatalf("startup: HTTP server is not ready: %v", err)
+	}
+	log.Printf("startup: HTTP server ready at http://127.0.0.1:%d", *portFlag)
+
+	log.Printf("startup: creating WebView window")
 	window := webview.New(false)
 	if window == nil {
-		log.Fatal("webview init failed on this system")
+		log.Fatal("startup: webview init failed on this system")
 	}
 	defer window.Destroy()
 
+	windowURL := fmt.Sprintf("http://127.0.0.1:%d", *portFlag)
 	window.SetTitle("Minimal Socket Control")
 	window.SetSize(900, 620, webview.HintNone)
-	window.Navigate(fmt.Sprintf("http://127.0.0.1:%d", *portFlag))
+	window.Navigate(windowURL)
+
+	log.Printf("startup: WebView navigation started: %s", windowURL)
 	window.Run()
+	log.Printf("shutdown: WebView loop finished")
 
 	runtime.KeepAlive(stateCommands)
 }
 
+func runHTTPServer(httpServer *http.Server) {
+	log.Printf("startup: HTTP server listen begin on %s", httpServer.Addr)
+	err := httpServer.ListenAndServe()
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Printf("shutdown: HTTP server stopped with error: %v", err)
+		return
+	}
+	log.Printf("shutdown: HTTP server stopped")
+}
+
+// =============================
+// State owner goroutine.
+// =============================
+
 func runStateOwner(ctx context.Context, stateCommands <-chan stateCommand) {
 	currentState := applicationState{SocketPower: "off"}
+	log.Printf("state: owner goroutine started with power=%s", currentState.SocketPower)
 
 	for {
 		select {
 		case <-ctx.Done():
+			log.Printf("state: owner goroutine stopped")
 			return
 		case command := <-stateCommands:
-			if command.nextPower != "" {
-				if command.nextPower == "on" || command.nextPower == "off" {
-					currentState.SocketPower = command.nextPower
-				}
+			if command.nextPower == "on" || command.nextPower == "off" {
+				currentState.SocketPower = command.nextPower
+				log.Printf("state: power updated to %s", currentState.SocketPower)
 			}
 			command.reply <- currentState
 		}
 	}
 }
+
+// =============================
+// HTTP handlers.
+// =============================
 
 func handleGetState(stateCommands chan<- stateCommand) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, _ *http.Request) {
@@ -132,6 +175,19 @@ func writeJSON(responseWriter http.ResponseWriter, payload any) {
 		http.Error(responseWriter, err.Error(), http.StatusInternalServerError)
 	}
 }
+
+func withRequestLogging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		startedAt := time.Now()
+		log.Printf("http: request started method=%s path=%s", request.Method, request.URL.Path)
+		next.ServeHTTP(responseWriter, request)
+		log.Printf("http: request finished method=%s path=%s duration=%s", request.Method, request.URL.Path, time.Since(startedAt))
+	})
+}
+
+// =============================
+// Static content.
+// =============================
 
 func serveEmbeddedStatic(responseWriter http.ResponseWriter, request *http.Request) {
 	path := strings.TrimPrefix(request.URL.Path, "/")
