@@ -3,115 +3,182 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>DIO 1 Socket Control</title>
+  <title>DIO/DO Control</title>
   <style>
-    body { margin: 0; font-family: Arial, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; justify-content: center; align-items: center; }
-    .panel { width: 420px; border-radius: 14px; padding: 24px; background: #1e293b; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35); }
-    .status-row { margin: 16px 0; display: flex; align-items: center; justify-content: space-between; }
-    .status-lamp { width: 14px; height: 14px; border-radius: 50%; background: #64748b; box-shadow: 0 0 0 2px rgba(100, 116, 139, 0.35); }
-    .status-lamp.on { background: #22c55e; box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25), 0 0 16px rgba(34, 197, 94, 0.6); }
-    .status-lamp.off { background: #ef4444; box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25), 0 0 16px rgba(239, 68, 68, 0.45); }
-    .buttons { display: flex; gap: 12px; margin-top: 16px; }
-    button { flex: 1; border: 0; border-radius: 10px; font-size: 15px; color: #f8fafc; padding: 12px 10px; cursor: pointer; }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
-    #turn-on-button { background: #16a34a; }
-    #turn-off-button { background: #dc2626; }
-    #error-text { min-height: 20px; margin-top: 14px; color: #fca5a5; font-size: 14px; }
+    body { margin: 0; font-family: Arial, sans-serif; background: #0f172a; color: #e2e8f0; }
+    main { max-width: 980px; margin: 20px auto; padding: 0 12px 20px; }
+    h1 { margin-bottom: 10px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .card { background: #1e293b; border-radius: 12px; padding: 14px; border: 1px solid #334155; box-shadow: 0 8px 20px rgba(0,0,0,0.25); }
+    .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
+    .lamp { width: 14px; height: 14px; border-radius: 999px; background: #64748b; }
+    .lamp.on { background: #16a34a; box-shadow: 0 0 10px rgba(22, 163, 74, 0.6); }
+    .lamp.off { background: #9ca3af; }
+    .button-row { display: flex; gap: 8px; margin-bottom: 10px; }
+    button { border: 0; border-radius: 8px; padding: 8px 10px; color: white; cursor: pointer; }
+    .on-button { background: #166534; }
+    .on-button.active { background: #22c55e; box-shadow: 0 0 14px rgba(34, 197, 94, 0.75); }
+    .off-button { background: #475569; }
+    .off-button.active { background: #94a3b8; color: #0f172a; }
+    .save-button { background: #2563eb; width: 100%; }
+    input { width: 100%; box-sizing: border-box; border: 1px solid #334155; border-radius: 8px; padding: 8px; margin-bottom: 8px; background: #0f172a; color: #e2e8f0; }
+    #error-text { min-height: 20px; color: #fca5a5; }
   </style>
 </head>
 <body>
-  <main class="panel">
-    <h1>Управление розеткой</h1>
-    <p>DIO 1 порт: 5V output (ON/OFF)</p>
-    <div class="status-row">
-      <span>Состояние: <strong id="state-text">unknown</strong></span>
-      <span id="state-lamp" class="status-lamp"></span>
-    </div>
-    <div class="buttons">
-      <button id="turn-on-button">Включить</button>
-      <button id="turn-off-button">Выключить</button>
-    </div>
-    <p id="error-text"></p>
-  </main>
+<main>
+  <h1>DIO / DO Ports</h1>
+  <p id="error-text"></p>
+  <section id="ports-grid" class="grid"></section>
+</main>
 
-  <script>
-    const applicationModel = { socketState: "unknown", isRequestInFlight: false, errorText: "" };
-    const stateTextElement = document.getElementById("state-text");
-    const stateLampElement = document.getElementById("state-lamp");
-    const turnOnButtonElement = document.getElementById("turn-on-button");
-    const turnOffButtonElement = document.getElementById("turn-off-button");
-    const errorTextElement = document.getElementById("error-text");
+<script>
+  const applicationModel = { portsByNumber: {}, requestInFlight: false, errorText: "" };
 
-    function renderFromModel() {
-      stateTextElement.textContent = applicationModel.socketState;
-      stateLampElement.className = "status-lamp " + applicationModel.socketState;
-      turnOnButtonElement.disabled = applicationModel.isRequestInFlight;
-      turnOffButtonElement.disabled = applicationModel.isRequestInFlight;
-      errorTextElement.textContent = applicationModel.errorText;
-    }
+  const portsGridElement = document.getElementById("ports-grid");
+  const errorTextElement = document.getElementById("error-text");
 
-    function updateModelFromSnapshot(snapshotObject) {
-      const socketDeviceState = snapshotObject.devices.find(function findSocket(deviceState) { return deviceState.id === "socket-1"; });
-      if (!socketDeviceState) {
-        applicationModel.errorText = "socket-1 state is missing";
-        renderFromModel();
-        return;
-      }
-      applicationModel.socketState = socketDeviceState.power;
-      applicationModel.errorText = "";
-      renderFromModel();
-    }
+  function renderFromModel() {
+    errorTextElement.textContent = applicationModel.errorText;
+    portsGridElement.innerHTML = "";
 
-    async function requestSnapshot() {
-      const response = await fetch("/api/snapshot");
-      if (!response.ok) {
-        throw new Error("snapshot request failed");
-      }
-      return response.json();
-    }
+    const sortedPortNumbers = Object.keys(applicationModel.portsByNumber).map(Number).sort(function sortAscending(leftNumber, rightNumber) {
+      return leftNumber - rightNumber;
+    });
 
-    async function sendPowerCommand(turnOn) {
-      applicationModel.isRequestInFlight = true;
-      applicationModel.errorText = "";
-      renderFromModel();
+    sortedPortNumbers.forEach(function renderSinglePort(portNumber) {
+      const singlePortState = applicationModel.portsByNumber[portNumber];
 
-      try {
-        const response = await fetch("/api/power", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ turn_on: turnOn })
-        });
+      const cardElement = document.createElement("article");
+      cardElement.className = "card";
 
-        if (!response.ok) {
-          throw new Error("power command failed");
-        }
+      const topRowElement = document.createElement("div");
+      topRowElement.className = "row";
 
-        const snapshotObject = await response.json();
-        updateModelFromSnapshot(snapshotObject);
-      } catch (errorObject) {
-        applicationModel.errorText = String(errorObject);
-      } finally {
-        applicationModel.isRequestInFlight = false;
-        renderFromModel();
-      }
-    }
+      const titleElement = document.createElement("strong");
+      titleElement.textContent = "Port " + portNumber;
 
-    async function refreshLoop() {
-      try {
-        const snapshotObject = await requestSnapshot();
-        updateModelFromSnapshot(snapshotObject);
-      } catch (errorObject) {
-        applicationModel.errorText = String(errorObject);
-        renderFromModel();
-      }
-    }
+      const lampElement = document.createElement("span");
+      lampElement.className = "lamp " + singlePortState.power;
 
-    turnOnButtonElement.addEventListener("click", function onTurnOnClick() { void sendPowerCommand(true); });
-    turnOffButtonElement.addEventListener("click", function onTurnOffClick() { void sendPowerCommand(false); });
+      topRowElement.appendChild(titleElement);
+      topRowElement.appendChild(lampElement);
 
-    void refreshLoop();
-    setInterval(function periodicSnapshotRefresh() { void refreshLoop(); }, 1500);
+      const buttonRowElement = document.createElement("div");
+      buttonRowElement.className = "button-row";
+
+      const onButtonElement = document.createElement("button");
+      onButtonElement.className = singlePortState.power === "on" ? "on-button active" : "on-button";
+      onButtonElement.textContent = "ON";
+      onButtonElement.disabled = applicationModel.requestInFlight;
+      onButtonElement.addEventListener("click", function onPowerOnClick() {
+        void sendPowerToServer(portNumber, "on");
+      });
+
+      const offButtonElement = document.createElement("button");
+      offButtonElement.className = singlePortState.power === "off" ? "off-button active" : "off-button";
+      offButtonElement.textContent = "OFF";
+      offButtonElement.disabled = applicationModel.requestInFlight;
+      offButtonElement.addEventListener("click", function onPowerOffClick() {
+        void sendPowerToServer(portNumber, "off");
+      });
+
+      buttonRowElement.appendChild(onButtonElement);
+      buttonRowElement.appendChild(offButtonElement);
+
+      const labelInputElement = document.createElement("input");
+      labelInputElement.value = singlePortState.label;
+      labelInputElement.placeholder = "Device label";
+      labelInputElement.disabled = applicationModel.requestInFlight;
+
+      const saveButtonElement = document.createElement("button");
+      saveButtonElement.className = "save-button";
+      saveButtonElement.textContent = "Сохранить";
+      saveButtonElement.disabled = applicationModel.requestInFlight;
+      saveButtonElement.addEventListener("click", function onSaveClick() {
+        void sendLabelToServer(portNumber, labelInputElement.value);
+      });
+
+      cardElement.appendChild(topRowElement);
+      cardElement.appendChild(buttonRowElement);
+      cardElement.appendChild(labelInputElement);
+      cardElement.appendChild(saveButtonElement);
+
+      portsGridElement.appendChild(cardElement);
+    });
+  }
+
+  function applyStateFromServer(serverState) {
+    const nextPortsByNumber = {};
+    serverState.ports.forEach(function addPortToMap(singlePortState) {
+      nextPortsByNumber[singlePortState.port] = singlePortState;
+    });
+
+    applicationModel.portsByNumber = nextPortsByNumber;
+    applicationModel.errorText = "";
     renderFromModel();
-  </script>
+  }
+
+  async function requestStateFromServer() {
+    const response = await fetch("/api/state");
+    if (!response.ok) {
+      throw new Error("state request failed");
+    }
+    return response.json();
+  }
+
+  async function sendPowerToServer(portNumber, nextPower) {
+    applicationModel.requestInFlight = true;
+    applicationModel.errorText = "";
+    renderFromModel();
+
+    try {
+      const response = await fetch("/api/power", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ port: portNumber, power: nextPower })
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      applyStateFromServer(await response.json());
+    } catch (requestError) {
+      applicationModel.errorText = String(requestError);
+    } finally {
+      applicationModel.requestInFlight = false;
+      renderFromModel();
+    }
+  }
+
+  async function sendLabelToServer(portNumber, nextLabel) {
+    applicationModel.requestInFlight = true;
+    applicationModel.errorText = "";
+    renderFromModel();
+
+    try {
+      const response = await fetch("/api/label", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ port: portNumber, label: nextLabel })
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      applyStateFromServer(await response.json());
+    } catch (requestError) {
+      applicationModel.errorText = String(requestError);
+    } finally {
+      applicationModel.requestInFlight = false;
+      renderFromModel();
+    }
+  }
+
+  requestStateFromServer().then(applyStateFromServer).catch(function onInitialError(initialError) {
+    applicationModel.errorText = String(initialError);
+    renderFromModel();
+  });
+
+  renderFromModel();
+</script>
 </body>
 </html>

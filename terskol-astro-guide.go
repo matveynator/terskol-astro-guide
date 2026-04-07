@@ -1,222 +1,315 @@
 package main
 
 import (
-	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
-
-	webview "github.com/webview/webview_go"
 )
+
+import "github.com/webview/webview"
 
 // =============================
 // Embedded static assets.
 // =============================
 
 //go:embed static/*
-var embeddedStaticFiles embed.FS
+var staticFiles embed.FS
 
 var (
-	portFlag      = flag.Int("port", 8765, "web server port")
-	directoryFlag = flag.String("directory", ".", "directory to serve files from")
+	portFlag                 = flag.Int("port", 8765, "web server port")
+	directoryFlag            = flag.String("directory", ".", "directory to serve files from")
+	dioValuePathTemplateFlag = flag.String("dio-value-path-template", "/sys/class/gpio/gpio%d/value", "DIO value file path template")
+	labelsFileFlag           = flag.String("labels-file", "dio-labels.json", "path to labels file")
 )
 
-// =============================
-// Domain model and contracts.
-// =============================
-
-type DeviceID string
-
-type DeviceType string
-
-type PowerState string
-
-const (
-	DeviceSocket1 DeviceID   = "socket-1"
-	DeviceTypeDIO DeviceType = "dio_5v_output"
-	PowerStateOff PowerState = "off"
-	PowerStateOn  PowerState = "on"
-)
-
-type DeviceState struct {
-	ID    DeviceID   `json:"id"`
-	Type  DeviceType `json:"type"`
-	Power PowerState `json:"power"`
-}
-
-type AppSnapshot struct {
-	Devices []DeviceState `json:"devices"`
-}
-
-type DIOBackend interface {
-	SetDIOPort(ctx context.Context, deviceID DeviceID, turnOn bool) error
-	ReadDIOPort(ctx context.Context, deviceID DeviceID) (bool, error)
-}
+const portCount = 10
 
 // =============================
-// In-memory DIO backend.
+// Domain model.
 // =============================
 
-type MemoryDIOBackend struct {
-	stateByDevice map[DeviceID]bool
+type portState struct {
+	Port  int    `json:"port"`
+	Power string `json:"power"`
+	Label string `json:"label"`
 }
 
-func NewMemoryDIOBackend() *MemoryDIOBackend {
-	return &MemoryDIOBackend{stateByDevice: map[DeviceID]bool{DeviceSocket1: false}}
+type appState struct {
+	Ports []portState `json:"ports"`
 }
-
-func (backend *MemoryDIOBackend) SetDIOPort(_ context.Context, deviceID DeviceID, turnOn bool) error {
-	if _, exists := backend.stateByDevice[deviceID]; !exists {
-		return fmt.Errorf("unknown device: %s", deviceID)
-	}
-	backend.stateByDevice[deviceID] = turnOn
-	return nil
-}
-
-func (backend *MemoryDIOBackend) ReadDIOPort(_ context.Context, deviceID DeviceID) (bool, error) {
-	state, exists := backend.stateByDevice[deviceID]
-	if !exists {
-		return false, fmt.Errorf("unknown device: %s", deviceID)
-	}
-	return state, nil
-}
-
-// =============================
-// Relay manager goroutine.
-// =============================
-
-type relayCommandType int
-
-const (
-	relayCommandSnapshot relayCommandType = iota
-	relayCommandSetPower
-)
-
-type relayCommand struct {
-	commandType relayCommandType
-	deviceID    DeviceID
-	turnOn      bool
-	reply       chan relayReply
-}
-
-type relayReply struct {
-	snapshot AppSnapshot
-	err      error
-}
-
-func runRelayManager(ctx context.Context, backend DIOBackend, commands <-chan relayCommand) {
-	stateByDevice := map[DeviceID]DeviceState{
-		DeviceSocket1: {
-			ID:    DeviceSocket1,
-			Type:  DeviceTypeDIO,
-			Power: PowerStateOff,
-		},
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case command := <-commands:
-			switch command.commandType {
-			case relayCommandSnapshot:
-				command.reply <- relayReply{snapshot: makeSnapshot(stateByDevice)}
-			case relayCommandSetPower:
-				err := backend.SetDIOPort(ctx, command.deviceID, command.turnOn)
-				if err != nil {
-					command.reply <- relayReply{err: err}
-					continue
-				}
-
-				confirmedState, err := backend.ReadDIOPort(ctx, command.deviceID)
-				if err != nil {
-					command.reply <- relayReply{err: err}
-					continue
-				}
-
-				deviceState := stateByDevice[command.deviceID]
-				if confirmedState {
-					deviceState.Power = PowerStateOn
-				} else {
-					deviceState.Power = PowerStateOff
-				}
-				stateByDevice[command.deviceID] = deviceState
-				command.reply <- relayReply{snapshot: makeSnapshot(stateByDevice)}
-			}
-		}
-	}
-}
-
-func makeSnapshot(stateByDevice map[DeviceID]DeviceState) AppSnapshot {
-	return AppSnapshot{Devices: []DeviceState{stateByDevice[DeviceSocket1]}}
-}
-
-// =============================
-// API handlers.
-// =============================
 
 type setPowerRequest struct {
-	TurnOn bool `json:"turn_on"`
+	Port  int    `json:"port"`
+	Power string `json:"power"`
 }
 
-func getSnapshotHandler(commands chan<- relayCommand) http.HandlerFunc {
-	return func(responseWriter http.ResponseWriter, _ *http.Request) {
-		reply := make(chan relayReply, 1)
-		commands <- relayCommand{commandType: relayCommandSnapshot, reply: reply}
-		result := <-reply
-		if result.err != nil {
-			http.Error(responseWriter, result.err.Error(), http.StatusInternalServerError)
-			return
+type setLabelRequest struct {
+	Port  int    `json:"port"`
+	Label string `json:"label"`
+}
+
+type stateCommand struct {
+	kind  string
+	port  int
+	power string
+	label string
+	reply chan stateReply
+}
+
+type stateReply struct {
+	state appState
+	err   error
+}
+
+// =============================
+// Main entry point.
+// =============================
+
+func main() {
+	flag.Parse()
+
+	stateCommands := make(chan stateCommand)
+	go runStateOwner(stateCommands, *dioValuePathTemplateFlag, *labelsFileFlag)
+
+	http.HandleFunc("/api/state", handleGetState(stateCommands))
+	http.HandleFunc("/api/power", handleSetPower(stateCommands))
+	http.HandleFunc("/api/label", handleSetLabel(stateCommands))
+	http.HandleFunc("/", handleRequest)
+
+	address := fmt.Sprintf(":%d", *portFlag)
+	log.Printf("startup: starting HTTP server on http://localhost%s", address)
+	go func() {
+		err := http.ListenAndServe(address, nil)
+		if err != nil {
+			log.Printf("shutdown: HTTP server stopped: %v", err)
 		}
-		writeJSON(responseWriter, result.snapshot)
+	}()
+
+	window := webview.New(false)
+	defer window.Destroy()
+	window.SetTitle("DIO/DO Control · ECX-1000-2G")
+	window.SetSize(980, 760, webview.HintNone)
+	window.Navigate("http://localhost" + address)
+
+	log.Printf("webview: window started")
+	window.Run()
+	log.Printf("shutdown: webview stopped")
+}
+
+// =============================
+// State owner goroutine.
+// =============================
+
+func runStateOwner(stateCommands <-chan stateCommand, dioValuePathTemplate string, labelsFile string) {
+	state := buildInitialState(loadLabels(labelsFile))
+	log.Printf("state: owner started with %d ports", len(state.Ports))
+
+	for command := range stateCommands {
+		switch command.kind {
+		case "get":
+			command.reply <- stateReply{state: cloneState(state)}
+		case "set_power":
+			resultState, err := applyPower(state, command.port, command.power, dioValuePathTemplate)
+			if err != nil {
+				command.reply <- stateReply{state: cloneState(state), err: err}
+				continue
+			}
+			state = resultState
+			command.reply <- stateReply{state: cloneState(state)}
+		case "set_label":
+			resultState, err := applyLabel(state, command.port, command.label)
+			if err != nil {
+				command.reply <- stateReply{state: cloneState(state), err: err}
+				continue
+			}
+			if err := saveLabels(labelsFile, resultState); err != nil {
+				command.reply <- stateReply{state: cloneState(state), err: err}
+				continue
+			}
+			state = resultState
+			command.reply <- stateReply{state: cloneState(state)}
+		default:
+			command.reply <- stateReply{state: cloneState(state), err: errors.New("unknown command")}
+		}
 	}
 }
 
-func setPowerHandler(commands chan<- relayCommand) http.HandlerFunc {
-	return func(responseWriter http.ResponseWriter, request *http.Request) {
+func buildInitialState(savedLabels map[int]string) appState {
+	ports := make([]portState, 0, portCount)
+	for portIndex := 1; portIndex <= portCount; portIndex++ {
+		label := savedLabels[portIndex]
+		if label == "" {
+			label = fmt.Sprintf("DIO %d", portIndex)
+		}
+		ports = append(ports, portState{Port: portIndex, Power: "off", Label: label})
+	}
+	return appState{Ports: ports}
+}
+
+func applyPower(state appState, port int, nextPower string, dioValuePathTemplate string) (appState, error) {
+	if port < 1 || port > portCount {
+		return state, errors.New("invalid port")
+	}
+	if nextPower != "on" && nextPower != "off" {
+		return state, errors.New("power must be on or off")
+	}
+
+	if err := writeDIOPower(port, nextPower, dioValuePathTemplate); err != nil {
+		return state, err
+	}
+
+	nextState := cloneState(state)
+	nextState.Ports[port-1].Power = nextPower
+	log.Printf("dio: port=%d power=%s", port, nextPower)
+	return nextState, nil
+}
+
+func applyLabel(state appState, port int, nextLabel string) (appState, error) {
+	if port < 1 || port > portCount {
+		return state, errors.New("invalid port")
+	}
+	sanitizedLabel := strings.TrimSpace(nextLabel)
+	if sanitizedLabel == "" {
+		return state, errors.New("label is required")
+	}
+
+	nextState := cloneState(state)
+	nextState.Ports[port-1].Label = sanitizedLabel
+	log.Printf("dio: port=%d label=%s", port, sanitizedLabel)
+	return nextState, nil
+}
+
+func cloneState(source appState) appState {
+	copiedPorts := make([]portState, len(source.Ports))
+	copy(copiedPorts, source.Ports)
+	return appState{Ports: copiedPorts}
+}
+
+func writeDIOPower(port int, nextPower string, dioValuePathTemplate string) error {
+	if runtime.GOOS != "linux" {
+		log.Printf("dio: non-linux runtime, skip physical write for port=%d", port)
+		return nil
+	}
+
+	nextValue := "0"
+	if nextPower == "on" {
+		nextValue = "1"
+	}
+	path := fmt.Sprintf(dioValuePathTemplate, port)
+	return os.WriteFile(path, []byte(nextValue), 0o644)
+}
+
+func loadLabels(labelsFile string) map[int]string {
+	fileData, err := os.ReadFile(labelsFile)
+	if err != nil {
+		return map[int]string{}
+	}
+
+	var labels map[int]string
+	if err := json.Unmarshal(fileData, &labels); err != nil {
+		return map[int]string{}
+	}
+	return labels
+}
+
+func saveLabels(labelsFile string, state appState) error {
+	labels := map[int]string{}
+	for _, singlePortState := range state.Ports {
+		labels[singlePortState.Port] = singlePortState.Label
+	}
+	fileData, err := json.MarshalIndent(labels, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(labelsFile, fileData, 0o644)
+}
+
+// =============================
+// HTTP handlers.
+// =============================
+
+func handleGetState(stateCommands chan<- stateCommand) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		log.Printf("http: %s %s", request.Method, request.URL.Path)
+		reply := make(chan stateReply, 1)
+		stateCommands <- stateCommand{kind: "get", reply: reply}
+		result := <-reply
+		if result.err != nil {
+			http.Error(writer, result.err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(writer, result.state)
+	}
+}
+
+func handleSetPower(stateCommands chan<- stateCommand) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		log.Printf("http: %s %s", request.Method, request.URL.Path)
 		if request.Method != http.MethodPost {
-			http.Error(responseWriter, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
 		var apiRequest setPowerRequest
 		if err := json.NewDecoder(request.Body).Decode(&apiRequest); err != nil {
-			http.Error(responseWriter, "invalid json", http.StatusBadRequest)
+			http.Error(writer, "invalid json", http.StatusBadRequest)
 			return
 		}
 
-		reply := make(chan relayReply, 1)
-		commands <- relayCommand{commandType: relayCommandSetPower, deviceID: DeviceSocket1, turnOn: apiRequest.TurnOn, reply: reply}
+		reply := make(chan stateReply, 1)
+		stateCommands <- stateCommand{kind: "set_power", port: apiRequest.Port, power: apiRequest.Power, reply: reply}
 		result := <-reply
 		if result.err != nil {
-			http.Error(responseWriter, result.err.Error(), http.StatusInternalServerError)
+			http.Error(writer, result.err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(responseWriter, result.snapshot)
+		writeJSON(writer, result.state)
 	}
 }
 
-func writeJSON(responseWriter http.ResponseWriter, payload any) {
-	responseWriter.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(responseWriter).Encode(payload); err != nil {
-		http.Error(responseWriter, err.Error(), http.StatusInternalServerError)
+func handleSetLabel(stateCommands chan<- stateCommand) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		log.Printf("http: %s %s", request.Method, request.URL.Path)
+		if request.Method != http.MethodPost {
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var apiRequest setLabelRequest
+		if err := json.NewDecoder(request.Body).Decode(&apiRequest); err != nil {
+			http.Error(writer, "invalid json", http.StatusBadRequest)
+			return
+		}
+
+		reply := make(chan stateReply, 1)
+		stateCommands <- stateCommand{kind: "set_label", port: apiRequest.Port, label: apiRequest.Label, reply: reply}
+		result := <-reply
+		if result.err != nil {
+			http.Error(writer, result.err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(writer, result.state)
 	}
 }
 
+func writeJSON(writer http.ResponseWriter, payload any) {
+	writer.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(writer).Encode(payload)
+}
+
 // =============================
-// HTTP static file handling.
+// Static file serving.
 // =============================
 
-func staticHandler(responseWriter http.ResponseWriter, request *http.Request) {
+func handleRequest(writer http.ResponseWriter, request *http.Request) {
 	requestedFile := strings.TrimPrefix(request.URL.Path, "/")
 	if requestedFile == "" {
 		requestedFile = "index.html"
@@ -224,41 +317,41 @@ func staticHandler(responseWriter http.ResponseWriter, request *http.Request) {
 
 	fullPathToFile := filepath.Join(*directoryFlag, requestedFile)
 	if fileExists(fullPathToFile) {
-		http.ServeFile(responseWriter, request, fullPathToFile)
+		http.ServeFile(writer, request, fullPathToFile)
 		return
 	}
 
-	if fileExistsInEmbeddedStatic(requestedFile) {
-		embeddedFileData, err := embeddedStaticFiles.ReadFile(filepath.Join("static", requestedFile))
+	if fileExistsInStatic(requestedFile) {
+		fileData, err := staticFiles.ReadFile(filepath.Join("static", requestedFile))
 		if err != nil {
-			http.Error(responseWriter, "internal server error", http.StatusInternalServerError)
+			http.Error(writer, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
-		responseWriter.Header().Set("Content-Type", getContentType(requestedFile))
-		_, _ = responseWriter.Write(embeddedFileData)
+		writer.Header().Set("Content-Type", getContentType(requestedFile))
+		_, _ = writer.Write(fileData)
 		return
 	}
 
-	http.NotFound(responseWriter, request)
+	http.NotFound(writer, request)
 }
 
 func fileExists(filename string) bool {
-	fileInfo, err := os.Stat(filename)
+	info, err := os.Stat(filename)
 	if os.IsNotExist(err) {
 		return false
 	}
-	return err == nil && !fileInfo.IsDir()
+	return err == nil && !info.IsDir()
 }
 
-func fileExistsInEmbeddedStatic(filename string) bool {
-	_, err := fs.Stat(embeddedStaticFiles, filepath.Join("static", filename))
+func fileExistsInStatic(filename string) bool {
+	_, err := staticFiles.ReadFile(filepath.Join("static", filename))
 	return err == nil
 }
 
 func getContentType(filename string) string {
 	switch strings.ToLower(filepath.Ext(filename)) {
 	case ".html":
-		return "text/html; charset=utf-8"
+		return "text/html"
 	case ".js":
 		return "application/javascript"
 	case ".css":
@@ -266,45 +359,4 @@ func getContentType(filename string) string {
 	default:
 		return "application/octet-stream"
 	}
-}
-
-// =============================
-// Application bootstrap.
-// =============================
-
-func main() {
-	flag.Parse()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	backend := NewMemoryDIOBackend()
-	commands := make(chan relayCommand)
-	go runRelayManager(ctx, backend, commands)
-
-	http.HandleFunc("/api/snapshot", getSnapshotHandler(commands))
-	http.HandleFunc("/api/power", setPowerHandler(commands))
-	http.HandleFunc("/", staticHandler)
-
-	address := fmt.Sprintf(":%d", *portFlag)
-	go func() {
-		if err := http.ListenAndServe(address, nil); err != nil {
-			log.Printf("http server stopped: %v", err)
-		}
-	}()
-
-	window := webview.New(false)
-	if window == nil {
-		log.Fatal("failed to create webview window")
-	}
-	defer window.Destroy()
-
-	window.SetTitle("DIO 1 Socket Control")
-	window.SetSize(920, 700, webview.HintNone)
-	window.Navigate("http://localhost" + address)
-	window.Run()
-
-	// runtime.KeepAlive prevents important references from being finalized before shutdown.
-	runtime.KeepAlive(backend)
-	time.Sleep(10 * time.Millisecond)
 }

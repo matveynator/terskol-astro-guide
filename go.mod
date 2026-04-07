@@ -2,6 +2,4 @@ module terskol-astro-guide
 
 go 1.22
 
-require github.com/webview/webview_go v0.0.0
-
-replace github.com/webview/webview_go => ./third_party/webview_go
+require github.com/webview/webview v0.0.0-20230602035950-899018ad0e5c
