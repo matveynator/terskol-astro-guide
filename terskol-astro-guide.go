@@ -1,289 +1,225 @@
 package main
 
 import (
-	"context"
 	"embed"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"log"
-	"net"
 	"net/http"
-	"os/exec"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
-	webview "github.com/webview/webview_go"
+	"github.com/webview/webview"
 )
 
 // =============================
-// Embedded files and flags.
+// Embedded static assets.
 // =============================
 
 //go:embed static/*
-var embeddedFiles embed.FS
+var staticFiles embed.FS
 
-var portFlag = flag.Int("port", 8765, "HTTP port")
+var (
+	portFlag         = flag.Int("port", 8765, "web server port")
+	directoryFlag    = flag.String("directory", ".", "directory to serve files from")
+	dioValueFileFlag = flag.String("dio-value-file", "/sys/class/gpio/gpio0/value", "first DIO port value file")
+)
 
 // =============================
-// State model and commands.
+// DIO command pipeline.
 // =============================
 
-type applicationState struct {
-	SocketPower string `json:"socket_power"`
-}
-
-type setPowerRequest struct {
-	Power string `json:"power"`
-}
-
-type stateCommand struct {
+type dioCommand struct {
 	nextPower string
-	reply     chan applicationState
+	reply     chan dioReply
+}
+
+type dioReply struct {
+	power string
+	err   error
 }
 
 // =============================
-// Application bootstrap.
+// Main entry point.
 // =============================
 
 func main() {
-	// WebView on macOS is more stable when UI setup stays on the main locked thread.
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	flag.Parse()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	dioCommands := make(chan dioCommand)
+	go runFirstDIOOwner(dioCommands, *dioValueFileFlag)
 
-	stateCommands := make(chan stateCommand)
-	go runStateOwner(ctx, stateCommands)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/state", handleGetState(stateCommands))
-	mux.HandleFunc("/api/power", handleSetPower(stateCommands))
-	mux.HandleFunc("/", serveEmbeddedStatic)
+	http.HandleFunc("/api/state", handleDIOState(dioCommands))
+	http.HandleFunc("/api/power", handleDIOPower(dioCommands))
+	http.HandleFunc("/", handleRequest)
 
 	address := fmt.Sprintf(":%d", *portFlag)
-	httpServer := &http.Server{
-		Addr:    address,
-		Handler: withRequestLogging(mux),
-	}
-
-	log.Printf("startup: preparing HTTP server on %s", address)
-	go runHTTPServer(httpServer)
-
-	if err := waitHTTPServerReady("127.0.0.1", *portFlag, 5*time.Second); err != nil {
-		log.Fatalf("startup: HTTP server is not ready: %v", err)
-	}
-
-	windowURL := fmt.Sprintf("http://127.0.0.1:%d", *portFlag)
-	log.Printf("startup: HTTP server ready at %s", windowURL)
-	log.Printf("startup: entering WebView supervisor loop")
-	runWebViewSupervisor(windowURL)
-
-	runtime.KeepAlive(stateCommands)
-}
-
-func runHTTPServer(httpServer *http.Server) {
-	log.Printf("startup: HTTP server listen begin on %s", httpServer.Addr)
-	err := httpServer.ListenAndServe()
-	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Printf("shutdown: HTTP server stopped with error: %v", err)
-		return
-	}
-	log.Printf("shutdown: HTTP server stopped")
-}
-
-func runWebViewSupervisor(windowURL string) {
-	restartDelay := 1200 * time.Millisecond
-	fastExitCount := 0
-	browserFallbackWasStarted := false
-
-	for {
-		runDuration := runWebViewOnce(windowURL)
-		if runDuration >= 2*time.Second {
-			fastExitCount = 0
-			log.Printf("webview: window closed after %s; restarting in %s", runDuration, restartDelay)
-		} else {
-			fastExitCount++
-			log.Printf("webview: window exited too fast after %s; restarting in %s", runDuration, restartDelay)
-			if fastExitCount >= 3 && !browserFallbackWasStarted {
-				if err := openSystemBrowserWindow(windowURL); err != nil {
-					log.Printf("browser fallback: failed to open system browser: %v", err)
-				} else {
-					browserFallbackWasStarted = true
-					log.Printf("browser fallback: opened system browser at %s", windowURL)
-				}
-			}
+	log.Printf("startup: starting HTTP server on http://localhost%s", address)
+	go func() {
+		err := http.ListenAndServe(address, nil)
+		if err != nil {
+			log.Printf("shutdown: HTTP server stopped: %v", err)
 		}
-		time.Sleep(restartDelay)
-	}
-}
+	}()
 
-func openSystemBrowserWindow(windowURL string) error {
-	var command *exec.Cmd
-
-	if runtime.GOOS == "darwin" {
-		command = exec.Command("open", windowURL)
-	} else if runtime.GOOS == "windows" {
-		command = exec.Command("cmd", "/c", "start", windowURL)
-	} else {
-		command = exec.Command("xdg-open", windowURL)
+	onPageLoaded := func(_ webview.WebView, loadedURL string) {
+		log.Printf("webview: loaded %s", loadedURL)
 	}
 
-	return command.Start()
-}
-
-func runWebViewOnce(windowURL string) time.Duration {
-	log.Printf("startup: creating WebView window")
 	window := webview.New(false)
-	if window == nil {
-		log.Printf("startup: webview init failed; retry will continue")
-		return 0
-	}
 	defer window.Destroy()
 
-	window.SetTitle("Minimal Socket Control")
-	window.SetSize(900, 620, webview.HintNone)
-	window.Navigate(windowURL)
+	window.SetTitle("DIO Control · ECX-1000-2G")
+	window.SetSize(800, 600, webview.HintNone)
+	window.Navigate("http://localhost" + address)
+	_ = window.Bind("onPageLoaded", onPageLoaded)
 
-	startedAt := time.Now()
-	log.Printf("startup: WebView navigation started: %s", windowURL)
+	log.Printf("webview: window started")
 	window.Run()
-	runDuration := time.Since(startedAt)
-	log.Printf("shutdown: WebView loop finished after %s", runDuration)
-	return runDuration
+	log.Printf("shutdown: webview stopped")
 }
 
-// =============================
-// State owner goroutine.
-// =============================
+func runFirstDIOOwner(dioCommands <-chan dioCommand, dioValueFile string) {
+	currentPower := "off"
+	log.Printf("dio: owner started, target=%s", dioValueFile)
 
-func runStateOwner(ctx context.Context, stateCommands <-chan stateCommand) {
-	currentState := applicationState{SocketPower: "off"}
-	log.Printf("state: owner goroutine started with power=%s", currentState.SocketPower)
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Printf("state: owner goroutine stopped")
-			return
-		case command := <-stateCommands:
-			if command.nextPower == "on" || command.nextPower == "off" {
-				currentState.SocketPower = command.nextPower
-				log.Printf("state: power updated to %s", currentState.SocketPower)
-			}
-			command.reply <- currentState
+	for command := range dioCommands {
+		if command.nextPower == "" {
+			command.reply <- dioReply{power: currentPower}
+			continue
 		}
+
+		if command.nextPower != "on" && command.nextPower != "off" {
+			command.reply <- dioReply{power: currentPower, err: errors.New("power must be on or off")}
+			continue
+		}
+
+		if err := writeFirstDIOPower(dioValueFile, command.nextPower); err != nil {
+			command.reply <- dioReply{power: currentPower, err: err}
+			continue
+		}
+
+		currentPower = command.nextPower
+		log.Printf("dio: first port set to %s", currentPower)
+		command.reply <- dioReply{power: currentPower}
 	}
 }
 
-// =============================
-// HTTP handlers.
-// =============================
-
-func handleGetState(stateCommands chan<- stateCommand) http.HandlerFunc {
-	return func(responseWriter http.ResponseWriter, _ *http.Request) {
-		reply := make(chan applicationState, 1)
-		stateCommands <- stateCommand{reply: reply}
-		writeJSON(responseWriter, <-reply)
+func handleDIOState(dioCommands chan<- dioCommand) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		log.Printf("http: %s %s", request.Method, request.URL.Path)
+		reply := make(chan dioReply, 1)
+		dioCommands <- dioCommand{reply: reply}
+		result := <-reply
+		if result.err != nil {
+			http.Error(writer, result.err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(writer, map[string]string{"power": result.power})
 	}
 }
 
-func handleSetPower(stateCommands chan<- stateCommand) http.HandlerFunc {
-	return func(responseWriter http.ResponseWriter, request *http.Request) {
+func handleDIOPower(dioCommands chan<- dioCommand) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		log.Printf("http: %s %s", request.Method, request.URL.Path)
 		if request.Method != http.MethodPost {
-			http.Error(responseWriter, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
-		var apiRequest setPowerRequest
+		var apiRequest struct {
+			Power string `json:"power"`
+		}
 		if err := json.NewDecoder(request.Body).Decode(&apiRequest); err != nil {
-			http.Error(responseWriter, "invalid json", http.StatusBadRequest)
-			return
-		}
-		if apiRequest.Power != "on" && apiRequest.Power != "off" {
-			http.Error(responseWriter, "power must be on or off", http.StatusBadRequest)
+			http.Error(writer, "invalid json", http.StatusBadRequest)
 			return
 		}
 
-		reply := make(chan applicationState, 1)
-		stateCommands <- stateCommand{nextPower: apiRequest.Power, reply: reply}
-		writeJSON(responseWriter, <-reply)
+		reply := make(chan dioReply, 1)
+		dioCommands <- dioCommand{nextPower: apiRequest.Power, reply: reply}
+		result := <-reply
+		if result.err != nil {
+			http.Error(writer, result.err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(writer, map[string]string{"power": result.power})
 	}
 }
 
-func writeJSON(responseWriter http.ResponseWriter, payload any) {
-	responseWriter.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(responseWriter).Encode(payload); err != nil {
-		http.Error(responseWriter, err.Error(), http.StatusInternalServerError)
-	}
-}
-
-func withRequestLogging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
-		startedAt := time.Now()
-		log.Printf("http: request started method=%s path=%s", request.Method, request.URL.Path)
-		next.ServeHTTP(responseWriter, request)
-		log.Printf("http: request finished method=%s path=%s duration=%s", request.Method, request.URL.Path, time.Since(startedAt))
-	})
-}
-
-// =============================
-// Static content.
-// =============================
-
-func serveEmbeddedStatic(responseWriter http.ResponseWriter, request *http.Request) {
-	path := strings.TrimPrefix(request.URL.Path, "/")
-	if path == "" {
-		path = "index.html"
+func writeFirstDIOPower(dioValueFile string, nextPower string) error {
+	if runtime.GOOS != "linux" {
+		log.Printf("dio: non-linux runtime detected, keeping in-memory state only")
+		return nil
 	}
 
-	file, err := embeddedFiles.ReadFile(filepath.Join("static", path))
-	if errors.Is(err, fs.ErrNotExist) {
-		http.NotFound(responseWriter, request)
+	nextValue := "0"
+	if nextPower == "on" {
+		nextValue = "1"
+	}
+	return os.WriteFile(dioValueFile, []byte(nextValue), 0o644)
+}
+
+func writeJSON(writer http.ResponseWriter, payload any) {
+	writer.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(writer).Encode(payload)
+}
+
+func handleRequest(writer http.ResponseWriter, request *http.Request) {
+	requestedFile := strings.TrimPrefix(request.URL.Path, "/")
+	if requestedFile == "" {
+		requestedFile = "index.html"
+	}
+	log.Printf("http: requested file=%s", requestedFile)
+
+	fullPathToFile := *directoryFlag + "/" + requestedFile
+	if fileExists(fullPathToFile) {
+		log.Printf("http: serving local file=%s", fullPathToFile)
+		http.ServeFile(writer, request, fullPathToFile)
 		return
 	}
-	if err != nil {
-		http.Error(responseWriter, "internal server error", http.StatusInternalServerError)
+
+	if fileExistsInStatic(requestedFile) {
+		log.Printf("http: serving embedded file=%s", requestedFile)
+		fileData, err := staticFiles.ReadFile(filepath.Join("static", requestedFile))
+		if err != nil {
+			http.Error(writer, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		writer.Header().Set("Content-Type", getContentType(requestedFile))
+		_, _ = writer.Write(fileData)
 		return
 	}
 
-	responseWriter.Header().Set("Content-Type", contentType(path))
-	_, _ = responseWriter.Write(file)
+	http.NotFound(writer, request)
 }
 
-func contentType(path string) string {
-	switch strings.ToLower(filepath.Ext(path)) {
+func fileExists(filename string) bool {
+	info, err := os.Stat(filename)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return err == nil && !info.IsDir()
+}
+
+func fileExistsInStatic(filename string) bool {
+	_, err := staticFiles.ReadFile(filepath.Join("static", filename))
+	return err == nil
+}
+
+func getContentType(filename string) string {
+	switch strings.ToLower(filepath.Ext(filename)) {
 	case ".html":
-		return "text/html; charset=utf-8"
-	case ".css":
-		return "text/css"
+		return "text/html"
 	case ".js":
 		return "application/javascript"
+	case ".css":
+		return "text/css"
 	default:
 		return "application/octet-stream"
 	}
-}
-
-func waitHTTPServerReady(host string, port int, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	address := fmt.Sprintf("%s:%d", host, port)
-
-	for time.Now().Before(deadline) {
-		connection, err := net.DialTimeout("tcp", address, 150*time.Millisecond)
-		if err == nil {
-			_ = connection.Close()
-			return nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	return fmt.Errorf("timeout waiting for %s", address)
 }

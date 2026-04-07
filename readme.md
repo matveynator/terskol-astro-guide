@@ -1,60 +1,28 @@
 # terskol-astro-guide
 
-Минимальное desktop-приложение на Go + WebView.
+Минимальное desktop-приложение с WebView + HTTP API для управления питанием первого DIO порта.
 
-## Что делает
-- Поднимает локальный HTTP сервер.
-- Открывает `webview` окно.
-- Показывает один переключатель состояния `on/off`.
-- Пишет подробный лог старта, HTTP запросов и жизненного цикла WebView.
-- Если WebView закрылся слишком рано, автоматически пытается перезапустить окно.
-
-## Запуск на macOS
+## Запуск
 
 ```bash
-go run .
+go get github.com/webview/webview
+go run terskol-astro-guide.go
 ```
 
-## Что смотреть в логах
+## API
+- `GET /api/state` -> `{ "power": "on"|"off" }`
+- `POST /api/power` с JSON `{ "power": "on"|"off" }`
 
-При успешном старте должны быть строки:
-- `startup: preparing HTTP server ...`
-- `startup: HTTP server ready ...`
-- `startup: creating WebView window`
-- `startup: WebView navigation started ...`
+## DIO ECX-1000-2G
+По умолчанию запись идет в:
+- `/sys/class/gpio/gpio0/value`
 
-При запросах UI:
-- `http: request started ...`
-- `http: request finished ...`
-
-## Если окно не открылось
-
-1. Проверьте `CGO_ENABLED`:
+Можно поменять путь флагом:
 
 ```bash
-go env CGO_ENABLED
+go run terskol-astro-guide.go -dio-value-file /your/path/to/first/dio/value
 ```
 
-Для обычного macOS окружения должно быть `1`.
-
-2. Запустите повторно и проверьте, есть ли строка `startup: creating WebView window`.
-   Если строка есть, а окно не видно, проблема обычно в системной графической среде/WebKit.
-
-## Структура
-- `terskol-astro-guide.go` — вся бизнес-логика приложения в одном файле.
-- `static/index.html` — UI, встроенный через `go:embed`.
-- `third_party/webview_go/` — локальная зависимость webview.
-
-
-## Поведение при раннем закрытии
-
-Если `window.Run()` завершился сразу, приложение **не завершается**.
-Оно продолжает работать и перезапускает WebView с небольшой задержкой,
-чтобы desktop-процесс не падал молча.
-
-
-## Browser fallback
-
-Если встроенный WebView в рантайме закрывается мгновенно несколько раз подряд,
-приложение автоматически открывает системный браузер на том же URL и продолжает работу сервера.
-Это позволяет всегда увидеть UI, даже если конкретный WebView backend недоступен в окружении.
+## Локальная логика
+- Linux: запись `1/0` в файл DIO value.
+- Не Linux: состояние хранится в памяти (для отладки UI).

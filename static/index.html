@@ -3,131 +3,94 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Minimal Socket Control</title>
+  <title>DIO Power Control</title>
   <style>
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      font-family: Arial, sans-serif;
-      background: #0f172a;
-      color: #e2e8f0;
-    }
-    .panel {
-      width: 360px;
-      padding: 20px;
-      border-radius: 12px;
-      background: #1e293b;
-    }
-    .status {
-      margin: 14px 0;
-      font-size: 18px;
-    }
-    .button-row {
-      display: flex;
-      gap: 10px;
-    }
-    button {
-      flex: 1;
-      padding: 10px;
-      border: 0;
-      border-radius: 8px;
-      color: white;
-      cursor: pointer;
-    }
-    #turn-on-button { background: #16a34a; }
-    #turn-off-button { background: #dc2626; }
-    #error-text { min-height: 20px; color: #fca5a5; margin-top: 10px; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: Arial, sans-serif; background: #0f172a; color: #e2e8f0; }
+    main { width: 360px; background: #1e293b; border-radius: 12px; padding: 20px; }
+    .row { margin: 12px 0; }
+    .buttons { display: flex; gap: 10px; }
+    button { flex: 1; border: 0; border-radius: 8px; padding: 10px; color: white; cursor: pointer; }
+    #on-button { background: #16a34a; }
+    #off-button { background: #dc2626; }
+    #error-text { min-height: 20px; color: #fca5a5; }
   </style>
 </head>
 <body>
-  <main class="panel">
-    <h1>WebView Socket</h1>
-    <div class="status">Power: <strong id="power-text">unknown</strong></div>
-    <div class="button-row">
-      <button id="turn-on-button">ON</button>
-      <button id="turn-off-button">OFF</button>
-    </div>
-    <p id="error-text"></p>
-  </main>
+<main>
+  <h1>DIO Port 1</h1>
+  <p class="row">Power: <strong id="power-text">unknown</strong></p>
+  <div class="buttons row">
+    <button id="on-button">Включить</button>
+    <button id="off-button">Выключить</button>
+  </div>
+  <p id="error-text"></p>
+</main>
+<script>
+  const applicationModel = { currentPower: "unknown", isPending: false, errorText: "" };
 
-  <script>
-    const applicationModel = {
-      socketPower: "unknown",
-      requestInFlight: false,
-      errorText: ""
-    };
+  const powerTextElement = document.getElementById("power-text");
+  const onButtonElement = document.getElementById("on-button");
+  const offButtonElement = document.getElementById("off-button");
+  const errorTextElement = document.getElementById("error-text");
 
-    const powerTextElement = document.getElementById("power-text");
-    const turnOnButtonElement = document.getElementById("turn-on-button");
-    const turnOffButtonElement = document.getElementById("turn-off-button");
-    const errorTextElement = document.getElementById("error-text");
+  function renderFromModel() {
+    powerTextElement.textContent = applicationModel.currentPower;
+    onButtonElement.disabled = applicationModel.isPending;
+    offButtonElement.disabled = applicationModel.isPending;
+    errorTextElement.textContent = applicationModel.errorText;
+  }
 
-    function renderFromModel() {
-      powerTextElement.textContent = applicationModel.socketPower;
-      turnOnButtonElement.disabled = applicationModel.requestInFlight;
-      turnOffButtonElement.disabled = applicationModel.requestInFlight;
-      errorTextElement.textContent = applicationModel.errorText;
-    }
-
-    function applyStateFromServer(serverStateObject) {
-      applicationModel.socketPower = serverStateObject.socket_power;
-      applicationModel.errorText = "";
-      renderFromModel();
-    }
-
-    async function loadStateFromServer() {
-      const response = await fetch("/api/state");
-      if (!response.ok) {
-        throw new Error("state request failed");
-      }
-      return response.json();
-    }
-
-    async function sendPowerToServer(nextPowerState) {
-      applicationModel.requestInFlight = true;
-      applicationModel.errorText = "";
-      renderFromModel();
-
-      try {
-        const response = await fetch("/api/power", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ power: nextPowerState })
-        });
-
-        if (!response.ok) {
-          throw new Error("power request failed");
-        }
-
-        const serverStateObject = await response.json();
-        applyStateFromServer(serverStateObject);
-      } catch (requestError) {
-        applicationModel.errorText = String(requestError);
-      } finally {
-        applicationModel.requestInFlight = false;
-        renderFromModel();
-      }
-    }
-
-    turnOnButtonElement.addEventListener("click", function onTurnOnClick() {
-      void sendPowerToServer("on");
-    });
-
-    turnOffButtonElement.addEventListener("click", function onTurnOffClick() {
-      void sendPowerToServer("off");
-    });
-
-    loadStateFromServer()
-      .then(applyStateFromServer)
-      .catch(function onInitialStateError(initialLoadError) {
-        applicationModel.errorText = String(initialLoadError);
-        renderFromModel();
-      });
-
+  function applyServerState(serverState) {
+    applicationModel.currentPower = serverState.power;
+    applicationModel.errorText = "";
     renderFromModel();
-  </script>
+  }
+
+  async function requestStateFromServer() {
+    const response = await fetch("/api/state");
+    if (!response.ok) {
+      throw new Error("state request failed");
+    }
+    return response.json();
+  }
+
+  async function sendPowerToServer(nextPower) {
+    applicationModel.isPending = true;
+    applicationModel.errorText = "";
+    renderFromModel();
+
+    try {
+      const response = await fetch("/api/power", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ power: nextPower })
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      applyServerState(await response.json());
+    } catch (requestError) {
+      applicationModel.errorText = String(requestError);
+    } finally {
+      applicationModel.isPending = false;
+      renderFromModel();
+    }
+  }
+
+  onButtonElement.addEventListener("click", function onPowerOnClick() {
+    void sendPowerToServer("on");
+  });
+
+  offButtonElement.addEventListener("click", function onPowerOffClick() {
+    void sendPowerToServer("off");
+  });
+
+  requestStateFromServer().then(applyServerState).catch(function onInitError(initError) {
+    applicationModel.errorText = String(initError);
+    renderFromModel();
+  });
+
+  renderFromModel();
+</script>
 </body>
 </html>
