@@ -80,23 +80,11 @@ func main() {
 	if err := waitHTTPServerReady("127.0.0.1", *portFlag, 5*time.Second); err != nil {
 		log.Fatalf("startup: HTTP server is not ready: %v", err)
 	}
-	log.Printf("startup: HTTP server ready at http://127.0.0.1:%d", *portFlag)
-
-	log.Printf("startup: creating WebView window")
-	window := webview.New(false)
-	if window == nil {
-		log.Fatal("startup: webview init failed on this system")
-	}
-	defer window.Destroy()
 
 	windowURL := fmt.Sprintf("http://127.0.0.1:%d", *portFlag)
-	window.SetTitle("Minimal Socket Control")
-	window.SetSize(900, 620, webview.HintNone)
-	window.Navigate(windowURL)
-
-	log.Printf("startup: WebView navigation started: %s", windowURL)
-	window.Run()
-	log.Printf("shutdown: WebView loop finished")
+	log.Printf("startup: HTTP server ready at %s", windowURL)
+	log.Printf("startup: entering WebView supervisor loop")
+	runWebViewSupervisor(windowURL)
 
 	runtime.KeepAlive(stateCommands)
 }
@@ -109,6 +97,40 @@ func runHTTPServer(httpServer *http.Server) {
 		return
 	}
 	log.Printf("shutdown: HTTP server stopped")
+}
+
+func runWebViewSupervisor(windowURL string) {
+	restartDelay := 1200 * time.Millisecond
+	for {
+		runDuration := runWebViewOnce(windowURL)
+		if runDuration >= 2*time.Second {
+			log.Printf("webview: window closed after %s; restarting in %s", runDuration, restartDelay)
+		} else {
+			log.Printf("webview: window exited too fast after %s; restarting in %s", runDuration, restartDelay)
+		}
+		time.Sleep(restartDelay)
+	}
+}
+
+func runWebViewOnce(windowURL string) time.Duration {
+	log.Printf("startup: creating WebView window")
+	window := webview.New(false)
+	if window == nil {
+		log.Printf("startup: webview init failed; retry will continue")
+		return 0
+	}
+	defer window.Destroy()
+
+	window.SetTitle("Minimal Socket Control")
+	window.SetSize(900, 620, webview.HintNone)
+	window.Navigate(windowURL)
+
+	startedAt := time.Now()
+	log.Printf("startup: WebView navigation started: %s", windowURL)
+	window.Run()
+	runDuration := time.Since(startedAt)
+	log.Printf("shutdown: WebView loop finished after %s", runDuration)
+	return runDuration
 }
 
 // =============================
