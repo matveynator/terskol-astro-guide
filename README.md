@@ -1,6 +1,6 @@
 # terskol-astro-guide
 
-Desktop-приложение на WebView для управления 10 DIO - DI INPUT / DO OUTPUT портами.
+Приложение для управления 10 DIO - DI INPUT / DO OUTPUT портами. На Linux/macOS с CGO запускается встроенное окно WebView, на Windows работает как локальный HTTP-сервер (откройте URL в браузере).
 
 ## Что есть
 - 10 портов (1..10).
@@ -13,7 +13,7 @@ Desktop-приложение на WebView для управления 10 DIO - D
 ## Запуск
 
 ```bash
-go run terskol-astro-guide.go
+go run .
 ```
 
 ## Флаги
@@ -26,3 +26,8 @@ go run terskol-astro-guide.go
 - `GET /api/state`
 - `POST /api/power` body: `{ "port": 1, "power": "on" }`
 - `POST /api/label` body: `{ "port": 1, "label": "Pump" }`
+
+
+## Платформы
+- Linux/macOS + CGO: открывается встроенный WebView.
+- Windows или сборка без CGO: приложение запускает HTTP-сервер и пишет URL в лог.
