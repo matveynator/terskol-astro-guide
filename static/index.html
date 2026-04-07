@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DIO 1 Socket Control</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; justify-content: center; align-items: center; }
+    .panel { width: 420px; border-radius: 14px; padding: 24px; background: #1e293b; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35); }
+    .status-row { margin: 16px 0; display: flex; align-items: center; justify-content: space-between; }
+    .status-lamp { width: 14px; height: 14px; border-radius: 50%; background: #64748b; box-shadow: 0 0 0 2px rgba(100, 116, 139, 0.35); }
+    .status-lamp.on { background: #22c55e; box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25), 0 0 16px rgba(34, 197, 94, 0.6); }
+    .status-lamp.off { background: #ef4444; box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25), 0 0 16px rgba(239, 68, 68, 0.45); }
+    .buttons { display: flex; gap: 12px; margin-top: 16px; }
+    button { flex: 1; border: 0; border-radius: 10px; font-size: 15px; color: #f8fafc; padding: 12px 10px; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    #turn-on-button { background: #16a34a; }
+    #turn-off-button { background: #dc2626; }
+    #error-text { min-height: 20px; margin-top: 14px; color: #fca5a5; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <h1>Управление розеткой</h1>
+    <p>DIO 1 порт: 5V output (ON/OFF)</p>
+    <div class="status-row">
+      <span>Состояние: <strong id="state-text">unknown</strong></span>
+      <span id="state-lamp" class="status-lamp"></span>
+    </div>
+    <div class="buttons">
+      <button id="turn-on-button">Включить</button>
+      <button id="turn-off-button">Выключить</button>
+    </div>
+    <p id="error-text"></p>
+  </main>
+
+  <script>
+    const applicationModel = { socketState: "unknown", isRequestInFlight: false, errorText: "" };
+    const stateTextElement = document.getElementById("state-text");
+    const stateLampElement = document.getElementById("state-lamp");
+    const turnOnButtonElement = document.getElementById("turn-on-button");
+    const turnOffButtonElement = document.getElementById("turn-off-button");
+    const errorTextElement = document.getElementById("error-text");
+
+    function renderFromModel() {
+      stateTextElement.textContent = applicationModel.socketState;
+      stateLampElement.className = "status-lamp " + applicationModel.socketState;
+      turnOnButtonElement.disabled = applicationModel.isRequestInFlight;
+      turnOffButtonElement.disabled = applicationModel.isRequestInFlight;
+      errorTextElement.textContent = applicationModel.errorText;
+    }
+
+    function updateModelFromSnapshot(snapshotObject) {
+      const socketDeviceState = snapshotObject.devices.find(function findSocket(deviceState) { return deviceState.id === "socket-1"; });
+      if (!socketDeviceState) {
+        applicationModel.errorText = "socket-1 state is missing";
+        renderFromModel();
+        return;
+      }
+      applicationModel.socketState = socketDeviceState.power;
+      applicationModel.errorText = "";
+      renderFromModel();
+    }
+
+    async function requestSnapshot() {
+      const response = await fetch("/api/snapshot");
+      if (!response.ok) {
+        throw new Error("snapshot request failed");
+      }
+      return response.json();
+    }
+
+    async function sendPowerCommand(turnOn) {
+      applicationModel.isRequestInFlight = true;
+      applicationModel.errorText = "";
+      renderFromModel();
+
+      try {
+        const response = await fetch("/api/power", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ turn_on: turnOn })
+        });
+
+        if (!response.ok) {
+          throw new Error("power command failed");
+        }
+
+        const snapshotObject = await response.json();
+        updateModelFromSnapshot(snapshotObject);
+      } catch (errorObject) {
+        applicationModel.errorText = String(errorObject);
+      } finally {
+        applicationModel.isRequestInFlight = false;
+        renderFromModel();
+      }
+    }
+
+    async function refreshLoop() {
+      try {
+        const snapshotObject = await requestSnapshot();
+        updateModelFromSnapshot(snapshotObject);
+      } catch (errorObject) {
+        applicationModel.errorText = String(errorObject);
+        renderFromModel();
+      }
+    }
+
+    turnOnButtonElement.addEventListener("click", function onTurnOnClick() { void sendPowerCommand(true); });
+    turnOffButtonElement.addEventListener("click", function onTurnOffClick() { void sendPowerCommand(false); });
+
+    void refreshLoop();
+    setInterval(function periodicSnapshotRefresh() { void refreshLoop(); }, 1500);
+    renderFromModel();
+  </script>
+</body>
+</html>

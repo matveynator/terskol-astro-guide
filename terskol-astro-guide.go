@@ -2,79 +2,79 @@ package main
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
-	"errors"
+	"flag"
 	"fmt"
+	"io/fs"
 	"log"
-	"net/url"
+	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	webview "github.com/webview/webview_go"
 )
 
 // =============================
+// Embedded static assets.
+// =============================
+
+//go:embed static/*
+var embeddedStaticFiles embed.FS
+
+var (
+	portFlag      = flag.Int("port", 8765, "web server port")
+	directoryFlag = flag.String("directory", ".", "directory to serve files from")
+)
+
+// =============================
 // Domain model and contracts.
 // =============================
 
-// DeviceID keeps identifiers explicit so adding new DIO devices stays predictable.
 type DeviceID string
 
-const (
-	DeviceSocket1 DeviceID = "socket-1"
-)
-
-// DeviceType reserves room for future DIO devices (relays, lamps, motors, etc.).
 type DeviceType string
 
-const (
-	DeviceTypeRelaySocket DeviceType = "relay_socket"
-)
-
-// PowerState is explicit for easier JSON transfer and UI rendering.
 type PowerState string
 
 const (
+	DeviceSocket1 DeviceID   = "socket-1"
+	DeviceTypeDIO DeviceType = "dio_5v_output"
 	PowerStateOff PowerState = "off"
 	PowerStateOn  PowerState = "on"
 )
 
-// DeviceState is the single source of truth transferred between backend and UI.
 type DeviceState struct {
 	ID    DeviceID   `json:"id"`
 	Type  DeviceType `json:"type"`
 	Power PowerState `json:"power"`
 }
 
-// AppSnapshot can be extended with multiple devices without API breakage.
 type AppSnapshot struct {
 	Devices []DeviceState `json:"devices"`
 }
 
-// DIOBackend isolates platform specifics from the relay business flow.
 type DIOBackend interface {
-	SetRelay(ctx context.Context, deviceID DeviceID, turnOn bool) error
-	ReadRelay(ctx context.Context, deviceID DeviceID) (bool, error)
+	SetDIOPort(ctx context.Context, deviceID DeviceID, turnOn bool) error
+	ReadDIOPort(ctx context.Context, deviceID DeviceID) (bool, error)
 }
 
 // =============================
 // In-memory DIO backend.
 // =============================
 
-// MemoryDIOBackend provides deterministic behavior for MVP and desktop testing.
 type MemoryDIOBackend struct {
 	stateByDevice map[DeviceID]bool
 }
 
 func NewMemoryDIOBackend() *MemoryDIOBackend {
-	return &MemoryDIOBackend{
-		stateByDevice: map[DeviceID]bool{
-			DeviceSocket1: false,
-		},
-	}
+	return &MemoryDIOBackend{stateByDevice: map[DeviceID]bool{DeviceSocket1: false}}
 }
 
-func (backend *MemoryDIOBackend) SetRelay(_ context.Context, deviceID DeviceID, turnOn bool) error {
+func (backend *MemoryDIOBackend) SetDIOPort(_ context.Context, deviceID DeviceID, turnOn bool) error {
 	if _, exists := backend.stateByDevice[deviceID]; !exists {
 		return fmt.Errorf("unknown device: %s", deviceID)
 	}
@@ -82,28 +82,25 @@ func (backend *MemoryDIOBackend) SetRelay(_ context.Context, deviceID DeviceID, 
 	return nil
 }
 
-func (backend *MemoryDIOBackend) ReadRelay(_ context.Context, deviceID DeviceID) (bool, error) {
-	isOn, exists := backend.stateByDevice[deviceID]
+func (backend *MemoryDIOBackend) ReadDIOPort(_ context.Context, deviceID DeviceID) (bool, error) {
+	state, exists := backend.stateByDevice[deviceID]
 	if !exists {
 		return false, fmt.Errorf("unknown device: %s", deviceID)
 	}
-	return isOn, nil
+	return state, nil
 }
 
 // =============================
 // Relay manager goroutine.
 // =============================
 
-// relayCommandType keeps commands finite and explicit for select-based processing.
 type relayCommandType int
 
 const (
 	relayCommandSnapshot relayCommandType = iota
 	relayCommandSetPower
-	relayCommandShutdown
 )
 
-// relayCommand is the only way to mutate/read relay state, so mutex is unnecessary.
 type relayCommand struct {
 	commandType relayCommandType
 	deviceID    DeviceID
@@ -111,7 +108,6 @@ type relayCommand struct {
 	reply       chan relayReply
 }
 
-// relayReply unifies success and error paths for channel communication.
 type relayReply struct {
 	snapshot AppSnapshot
 	err      error
@@ -121,7 +117,7 @@ func runRelayManager(ctx context.Context, backend DIOBackend, commands <-chan re
 	stateByDevice := map[DeviceID]DeviceState{
 		DeviceSocket1: {
 			ID:    DeviceSocket1,
-			Type:  DeviceTypeRelaySocket,
+			Type:  DeviceTypeDIO,
 			Power: PowerStateOff,
 		},
 	}
@@ -135,13 +131,13 @@ func runRelayManager(ctx context.Context, backend DIOBackend, commands <-chan re
 			case relayCommandSnapshot:
 				command.reply <- relayReply{snapshot: makeSnapshot(stateByDevice)}
 			case relayCommandSetPower:
-				err := backend.SetRelay(ctx, command.deviceID, command.turnOn)
+				err := backend.SetDIOPort(ctx, command.deviceID, command.turnOn)
 				if err != nil {
 					command.reply <- relayReply{err: err}
 					continue
 				}
 
-				confirmedState, err := backend.ReadRelay(ctx, command.deviceID)
+				confirmedState, err := backend.ReadDIOPort(ctx, command.deviceID)
 				if err != nil {
 					command.reply <- relayReply{err: err}
 					continue
@@ -154,231 +150,131 @@ func runRelayManager(ctx context.Context, backend DIOBackend, commands <-chan re
 					deviceState.Power = PowerStateOff
 				}
 				stateByDevice[command.deviceID] = deviceState
-
 				command.reply <- relayReply{snapshot: makeSnapshot(stateByDevice)}
-			case relayCommandShutdown:
-				command.reply <- relayReply{}
-				return
 			}
 		}
 	}
 }
 
 func makeSnapshot(stateByDevice map[DeviceID]DeviceState) AppSnapshot {
-	orderedDevices := []DeviceState{stateByDevice[DeviceSocket1]}
-	return AppSnapshot{Devices: orderedDevices}
+	return AppSnapshot{Devices: []DeviceState{stateByDevice[DeviceSocket1]}}
 }
 
 // =============================
-// WebView bridge.
+// API handlers.
 // =============================
 
-// UIBridge exposes a narrow RPC API to JavaScript.
-type UIBridge struct {
-	commands chan<- relayCommand
+type setPowerRequest struct {
+	TurnOn bool `json:"turn_on"`
 }
 
-func NewUIBridge(commands chan<- relayCommand) *UIBridge {
-	return &UIBridge{commands: commands}
+func getSnapshotHandler(commands chan<- relayCommand) http.HandlerFunc {
+	return func(responseWriter http.ResponseWriter, _ *http.Request) {
+		reply := make(chan relayReply, 1)
+		commands <- relayCommand{commandType: relayCommandSnapshot, reply: reply}
+		result := <-reply
+		if result.err != nil {
+			http.Error(responseWriter, result.err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(responseWriter, result.snapshot)
+	}
 }
 
-func (bridge *UIBridge) GetSnapshot() (string, error) {
-	reply := make(chan relayReply, 1)
-	bridge.commands <- relayCommand{commandType: relayCommandSnapshot, reply: reply}
-	result := <-reply
-	if result.err != nil {
-		return "", result.err
+func setPowerHandler(commands chan<- relayCommand) http.HandlerFunc {
+	return func(responseWriter http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			http.Error(responseWriter, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var apiRequest setPowerRequest
+		if err := json.NewDecoder(request.Body).Decode(&apiRequest); err != nil {
+			http.Error(responseWriter, "invalid json", http.StatusBadRequest)
+			return
+		}
+
+		reply := make(chan relayReply, 1)
+		commands <- relayCommand{commandType: relayCommandSetPower, deviceID: DeviceSocket1, turnOn: apiRequest.TurnOn, reply: reply}
+		result := <-reply
+		if result.err != nil {
+			http.Error(responseWriter, result.err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(responseWriter, result.snapshot)
 	}
-	return snapshotToJSON(result.snapshot)
 }
 
-func (bridge *UIBridge) SetSocket1Power(turnOn bool) (string, error) {
-	reply := make(chan relayReply, 1)
-	bridge.commands <- relayCommand{
-		commandType: relayCommandSetPower,
-		deviceID:    DeviceSocket1,
-		turnOn:      turnOn,
-		reply:       reply,
+func writeJSON(responseWriter http.ResponseWriter, payload any) {
+	responseWriter.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(responseWriter).Encode(payload); err != nil {
+		http.Error(responseWriter, err.Error(), http.StatusInternalServerError)
 	}
-	result := <-reply
-	if result.err != nil {
-		return "", result.err
-	}
-	return snapshotToJSON(result.snapshot)
-}
-
-func snapshotToJSON(snapshot AppSnapshot) (string, error) {
-	encodedSnapshot, err := json.Marshal(snapshot)
-	if err != nil {
-		return "", err
-	}
-	return string(encodedSnapshot), nil
 }
 
 // =============================
-// Embedded UI markup.
+// HTTP static file handling.
 // =============================
 
-const htmlPage = `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Terskol Relay Control</title>
-  <style>
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-      background: #111827;
-      color: #f9fafb;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-    }
-    .panel {
-      width: 420px;
-      background: #1f2937;
-      border-radius: 12px;
-      padding: 24px;
-      box-shadow: 0 8px 30px rgba(0,0,0,0.35);
-    }
-    h1 {
-      margin-top: 0;
-      font-size: 24px;
-    }
-    .status {
-      margin: 14px 0;
-      font-size: 16px;
-    }
-    .status strong {
-      color: #93c5fd;
-    }
-    .row {
-      display: flex;
-      gap: 12px;
-    }
-    button {
-      flex: 1;
-      border: 0;
-      border-radius: 10px;
-      padding: 12px;
-      color: #f9fafb;
-      font-size: 15px;
-      cursor: pointer;
-    }
-    button:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-    .on {
-      background: #059669;
-    }
-    .off {
-      background: #dc2626;
-    }
-    .error {
-      margin-top: 12px;
-      color: #fca5a5;
-      min-height: 20px;
-    }
-  </style>
-</head>
-<body>
-  <main class="panel">
-    <h1>Socket Control</h1>
-    <p class="status">State: <strong id="power-state">unknown</strong></p>
-    <div class="row">
-      <button id="button-on" class="on">Turn ON</button>
-      <button id="button-off" class="off">Turn OFF</button>
-    </div>
-    <p id="error-message" class="error"></p>
-  </main>
+func staticHandler(responseWriter http.ResponseWriter, request *http.Request) {
+	requestedFile := strings.TrimPrefix(request.URL.Path, "/")
+	if requestedFile == "" {
+		requestedFile = "index.html"
+	}
 
-  <script>
-    const model = {
-      devicesByID: {},
-      isRequestActive: false,
-      errorText: ""
-    };
+	fullPathToFile := filepath.Join(*directoryFlag, requestedFile)
+	if fileExists(fullPathToFile) {
+		http.ServeFile(responseWriter, request, fullPathToFile)
+		return
+	}
 
-    const socketID = "socket-1";
+	if fileExistsInEmbeddedStatic(requestedFile) {
+		embeddedFileData, err := embeddedStaticFiles.ReadFile(filepath.Join("static", requestedFile))
+		if err != nil {
+			http.Error(responseWriter, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		responseWriter.Header().Set("Content-Type", getContentType(requestedFile))
+		_, _ = responseWriter.Write(embeddedFileData)
+		return
+	}
 
-    const powerStateElement = document.getElementById("power-state");
-    const buttonOnElement = document.getElementById("button-on");
-    const buttonOffElement = document.getElementById("button-off");
-    const errorMessageElement = document.getElementById("error-message");
+	http.NotFound(responseWriter, request)
+}
 
-    function renderUIFromModel() {
-      const deviceState = model.devicesByID[socketID];
-      if (!deviceState) {
-        powerStateElement.textContent = "unknown";
-      } else {
-        powerStateElement.textContent = deviceState.power;
-      }
+func fileExists(filename string) bool {
+	fileInfo, err := os.Stat(filename)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return err == nil && !fileInfo.IsDir()
+}
 
-      buttonOnElement.disabled = model.isRequestActive;
-      buttonOffElement.disabled = model.isRequestActive;
-      errorMessageElement.textContent = model.errorText;
-    }
+func fileExistsInEmbeddedStatic(filename string) bool {
+	_, err := fs.Stat(embeddedStaticFiles, filepath.Join("static", filename))
+	return err == nil
+}
 
-    function updateModelFromSnapshotJSON(snapshotJSON) {
-      const snapshot = JSON.parse(snapshotJSON);
-      const updatedDevicesByID = {};
-
-      for (const deviceState of snapshot.devices) {
-        updatedDevicesByID[deviceState.id] = deviceState;
-      }
-
-      model.devicesByID = updatedDevicesByID;
-      model.errorText = "";
-      renderUIFromModel();
-    }
-
-    async function refreshSnapshot() {
-      try {
-        const snapshotJSON = await bridge.GetSnapshot();
-        updateModelFromSnapshotJSON(snapshotJSON);
-      } catch (error) {
-        model.errorText = String(error);
-        renderUIFromModel();
-      }
-    }
-
-    async function setPowerState(turnOn) {
-      model.isRequestActive = true;
-      model.errorText = "";
-      renderUIFromModel();
-
-      try {
-        const snapshotJSON = await bridge.SetSocket1Power(turnOn);
-        updateModelFromSnapshotJSON(snapshotJSON);
-      } catch (error) {
-        model.errorText = String(error);
-      } finally {
-        model.isRequestActive = false;
-        renderUIFromModel();
-      }
-    }
-
-    buttonOnElement.addEventListener("click", function onClickTurnOn() {
-      void setPowerState(true);
-    });
-
-    buttonOffElement.addEventListener("click", function onClickTurnOff() {
-      void setPowerState(false);
-    });
-
-    void refreshSnapshot();
-  </script>
-</body>
-</html>`
+func getContentType(filename string) string {
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".html":
+		return "text/html; charset=utf-8"
+	case ".js":
+		return "application/javascript"
+	case ".css":
+		return "text/css"
+	default:
+		return "application/octet-stream"
+	}
+}
 
 // =============================
 // Application bootstrap.
 // =============================
 
 func main() {
+	flag.Parse()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -386,34 +282,29 @@ func main() {
 	commands := make(chan relayCommand)
 	go runRelayManager(ctx, backend, commands)
 
-	uiBridge := NewUIBridge(commands)
+	http.HandleFunc("/api/snapshot", getSnapshotHandler(commands))
+	http.HandleFunc("/api/power", setPowerHandler(commands))
+	http.HandleFunc("/", staticHandler)
 
-	debugMode := false
-	window := webview.New(debugMode)
+	address := fmt.Sprintf(":%d", *portFlag)
+	go func() {
+		if err := http.ListenAndServe(address, nil); err != nil {
+			log.Printf("http server stopped: %v", err)
+		}
+	}()
+
+	window := webview.New(false)
 	if window == nil {
 		log.Fatal("failed to create webview window")
 	}
 	defer window.Destroy()
 
-	window.SetTitle("Terskol Astro Guide - Relay")
-	window.SetSize(600, 420, webview.HintNone)
-
-	if err := window.Bind("bridge", uiBridge); err != nil {
-		log.Fatalf("failed to bind UI bridge: %v", err)
-	}
-
-	pageURL := "data:text/html," + url.PathEscape(htmlPage)
-	window.Navigate(pageURL)
+	window.SetTitle("DIO 1 Socket Control")
+	window.SetSize(920, 700, webview.HintNone)
+	window.Navigate("http://localhost" + address)
 	window.Run()
 
-	shutdownReply := make(chan relayReply, 1)
-	commands <- relayCommand{commandType: relayCommandShutdown, reply: shutdownReply}
-	result := <-shutdownReply
-	if result.err != nil && !errors.Is(result.err, context.Canceled) {
-		log.Printf("relay manager shutdown warning: %v", result.err)
-	}
-
-	// runtime.KeepAlive prevents aggressive optimizers from collecting bridge references early.
-	runtime.KeepAlive(uiBridge)
+	// runtime.KeepAlive prevents important references from being finalized before shutdown.
+	runtime.KeepAlive(backend)
 	time.Sleep(10 * time.Millisecond)
 }
