@@ -6,19 +6,20 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
-)
 
-//import "github.com/webview/webview"
-//import webview "github.com/jchv/go-webview2"
-import webview "github.com/jchv/go-webview-selector"
+	webview "github.com/jchv/go-webview-selector"
+)
 
 // =============================
 // Embedded static assets.
@@ -91,13 +92,15 @@ func main() {
 
 	address := fmt.Sprintf("127.0.0.1:%d", *portFlag)
 	log.Printf("startup: starting HTTP server on http://%s", address)
+
 	httpListener, err := net.Listen("tcp", address)
 	if err != nil {
 		log.Fatalf("startup: listen failed: %v", err)
 	}
+
 	go func() {
 		err := http.Serve(httpListener, nil)
-		if err != nil {
+		if err != nil && !errors.Is(err, net.ErrClosed) {
 			log.Printf("shutdown: HTTP server stopped: %v", err)
 		}
 	}()
@@ -105,7 +108,11 @@ func main() {
 	waitForServerReadiness(address, serverStartupTimeout)
 
 	window := webview.New(false)
+	if window == nil {
+		log.Fatal("webview: failed to create window")
+	}
 	defer window.Destroy()
+
 	window.SetTitle("DIO/DO Control · ECX-1000-2G")
 	window.SetSize(980, 760, webview.HintNone)
 	window.Navigate("http://" + address)
@@ -151,6 +158,7 @@ func runStateOwner(stateCommands <-chan stateCommand, dioValuePathTemplate strin
 		switch command.kind {
 		case "get":
 			command.reply <- stateReply{state: cloneState(state)}
+
 		case "set_power":
 			resultState, err := applyPower(state, command.port, command.power, dioValuePathTemplate)
 			if err != nil {
@@ -159,6 +167,7 @@ func runStateOwner(stateCommands <-chan stateCommand, dioValuePathTemplate strin
 			}
 			state = resultState
 			command.reply <- stateReply{state: cloneState(state)}
+
 		case "set_label":
 			resultState, err := applyLabel(state, command.port, command.label)
 			if err != nil {
@@ -171,6 +180,7 @@ func runStateOwner(stateCommands <-chan stateCommand, dioValuePathTemplate strin
 			}
 			state = resultState
 			command.reply <- stateReply{state: cloneState(state)}
+
 		default:
 			command.reply <- stateReply{state: cloneState(state), err: errors.New("unknown command")}
 		}
@@ -180,11 +190,15 @@ func runStateOwner(stateCommands <-chan stateCommand, dioValuePathTemplate strin
 func buildInitialState(savedLabels map[int]string) appState {
 	ports := make([]portState, 0, portCount)
 	for portIndex := 1; portIndex <= portCount; portIndex++ {
-		label := savedLabels[portIndex]
+		label := strings.TrimSpace(savedLabels[portIndex])
 		if label == "" {
 			label = fmt.Sprintf("DIO %d", portIndex)
 		}
-		ports = append(ports, portState{Port: portIndex, Power: "off", Label: label})
+		ports = append(ports, portState{
+			Port:  portIndex,
+			Power: "off",
+			Label: label,
+		})
 	}
 	return appState{Ports: ports}
 }
@@ -211,6 +225,7 @@ func applyLabel(state appState, port int, nextLabel string) (appState, error) {
 	if port < 1 || port > portCount {
 		return state, errors.New("invalid port")
 	}
+
 	sanitizedLabel := strings.TrimSpace(nextLabel)
 	if sanitizedLabel == "" {
 		return state, errors.New("label is required")
@@ -238,8 +253,9 @@ func writeDIOPower(port int, nextPower string, dioValuePathTemplate string) erro
 	if nextPower == "on" {
 		nextValue = "1"
 	}
-	path := fmt.Sprintf(dioValuePathTemplate, port)
-	return os.WriteFile(path, []byte(nextValue), 0o644)
+
+	gpioPath := fmt.Sprintf(dioValuePathTemplate, port)
+	return os.WriteFile(gpioPath, []byte(nextValue), 0o644)
 }
 
 func loadLabels(labelsFile string) map[int]string {
@@ -252,6 +268,7 @@ func loadLabels(labelsFile string) map[int]string {
 	if err := json.Unmarshal(fileData, &labels); err != nil {
 		return map[int]string{}
 	}
+
 	return labels
 }
 
@@ -260,10 +277,12 @@ func saveLabels(labelsFile string, state appState) error {
 	for _, singlePortState := range state.Ports {
 		labels[singlePortState.Port] = singlePortState.Label
 	}
+
 	fileData, err := json.MarshalIndent(labels, "", "  ")
 	if err != nil {
 		return err
 	}
+
 	return os.WriteFile(labelsFile, fileData, 0o644)
 }
 
@@ -274,13 +293,19 @@ func saveLabels(labelsFile string, state appState) error {
 func handleGetState(stateCommands chan<- stateCommand) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		log.Printf("http: %s %s", request.Method, request.URL.Path)
+
 		reply := make(chan stateReply, 1)
-		stateCommands <- stateCommand{kind: "get", reply: reply}
+		stateCommands <- stateCommand{
+			kind:  "get",
+			reply: reply,
+		}
+
 		result := <-reply
 		if result.err != nil {
 			http.Error(writer, result.err.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		writeJSON(writer, result.state)
 	}
 }
@@ -288,6 +313,7 @@ func handleGetState(stateCommands chan<- stateCommand) http.HandlerFunc {
 func handleSetPower(stateCommands chan<- stateCommand) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		log.Printf("http: %s %s", request.Method, request.URL.Path)
+
 		if request.Method != http.MethodPost {
 			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -300,12 +326,19 @@ func handleSetPower(stateCommands chan<- stateCommand) http.HandlerFunc {
 		}
 
 		reply := make(chan stateReply, 1)
-		stateCommands <- stateCommand{kind: "set_power", port: apiRequest.Port, power: apiRequest.Power, reply: reply}
+		stateCommands <- stateCommand{
+			kind:  "set_power",
+			port:  apiRequest.Port,
+			power: apiRequest.Power,
+			reply: reply,
+		}
+
 		result := <-reply
 		if result.err != nil {
 			http.Error(writer, result.err.Error(), http.StatusBadRequest)
 			return
 		}
+
 		writeJSON(writer, result.state)
 	}
 }
@@ -313,6 +346,7 @@ func handleSetPower(stateCommands chan<- stateCommand) http.HandlerFunc {
 func handleSetLabel(stateCommands chan<- stateCommand) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		log.Printf("http: %s %s", request.Method, request.URL.Path)
+
 		if request.Method != http.MethodPost {
 			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -325,18 +359,25 @@ func handleSetLabel(stateCommands chan<- stateCommand) http.HandlerFunc {
 		}
 
 		reply := make(chan stateReply, 1)
-		stateCommands <- stateCommand{kind: "set_label", port: apiRequest.Port, label: apiRequest.Label, reply: reply}
+		stateCommands <- stateCommand{
+			kind:  "set_label",
+			port:  apiRequest.Port,
+			label: apiRequest.Label,
+			reply: reply,
+		}
+
 		result := <-reply
 		if result.err != nil {
 			http.Error(writer, result.err.Error(), http.StatusBadRequest)
 			return
 		}
+
 		writeJSON(writer, result.state)
 	}
 }
 
 func writeJSON(writer http.ResponseWriter, payload any) {
-	writer.Header().Set("Content-Type", "application/json")
+	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(writer).Encode(payload)
 }
 
@@ -345,29 +386,51 @@ func writeJSON(writer http.ResponseWriter, payload any) {
 // =============================
 
 func handleRequest(writer http.ResponseWriter, request *http.Request) {
-	requestedFile := strings.TrimPrefix(request.URL.Path, "/")
-	if requestedFile == "" {
+	requestedFile := strings.TrimPrefix(path.Clean("/"+request.URL.Path), "/")
+	if requestedFile == "" || requestedFile == "." {
 		requestedFile = "index.html"
 	}
 
-	fullPathToFile := filepath.Join(*directoryFlag, requestedFile)
+	// 1. Try external file from directory flag.
+	fullPathToFile := filepath.Join(*directoryFlag, filepath.FromSlash(requestedFile))
 	if fileExists(fullPathToFile) {
 		http.ServeFile(writer, request, fullPathToFile)
 		return
 	}
 
-	if fileExistsInStatic(requestedFile) {
-		fileData, err := staticFiles.ReadFile(filepath.Join("static", requestedFile))
-		if err != nil {
-			http.Error(writer, "Internal Server Error", http.StatusInternalServerError)
-			return
-		}
-		writer.Header().Set("Content-Type", getContentType(requestedFile))
-		_, _ = writer.Write(fileData)
+	// 2. Try embedded file from static/*.
+	if serveEmbeddedFile(writer, requestedFile) {
 		return
 	}
 
 	http.NotFound(writer, request)
+}
+
+func serveEmbeddedFile(writer http.ResponseWriter, filename string) bool {
+	staticSubtree, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		log.Printf("static: fs.Sub failed: %v", err)
+		return false
+	}
+
+	cleanName := path.Clean(filename)
+	if cleanName == "." || cleanName == "/" {
+		cleanName = "index.html"
+	}
+	cleanName = strings.TrimPrefix(cleanName, "/")
+
+	fileData, err := fs.ReadFile(staticSubtree, cleanName)
+	if err != nil {
+		return false
+	}
+
+	contentType := getContentType(cleanName)
+	if contentType != "" {
+		writer.Header().Set("Content-Type", contentType)
+	}
+
+	_, _ = writer.Write(fileData)
+	return true
 }
 
 func fileExists(filename string) bool {
@@ -378,20 +441,40 @@ func fileExists(filename string) bool {
 	return err == nil && !info.IsDir()
 }
 
-func fileExistsInStatic(filename string) bool {
-	_, err := staticFiles.ReadFile(filepath.Join("static", filename))
-	return err == nil
-}
-
 func getContentType(filename string) string {
-	switch strings.ToLower(filepath.Ext(filename)) {
+	extension := strings.ToLower(filepath.Ext(filename))
+
+	switch extension {
 	case ".html":
-		return "text/html"
+		return "text/html; charset=utf-8"
 	case ".js":
-		return "application/javascript"
+		return "application/javascript; charset=utf-8"
+	case ".mjs":
+		return "application/javascript; charset=utf-8"
 	case ".css":
-		return "text/css"
-	default:
-		return "application/octet-stream"
+		return "text/css; charset=utf-8"
+	case ".json":
+		return "application/json; charset=utf-8"
+	case ".svg":
+		return "image/svg+xml"
+	case ".txt":
+		return "text/plain; charset=utf-8"
+	case ".ico":
+		return "image/x-icon"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
 	}
+
+	detectedType := mime.TypeByExtension(extension)
+	if detectedType != "" {
+		return detectedType
+	}
+
+	return "application/octet-stream"
 }
