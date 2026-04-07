@@ -14,7 +14,9 @@ import (
 	"strings"
 )
 
-import "github.com/webview/webview"
+//import "github.com/webview/webview"
+//import webview "github.com/jchv/go-webview2"
+import webview "github.com/jchv/go-webview-selector"
 
 // =============================
 // Embedded static assets.
