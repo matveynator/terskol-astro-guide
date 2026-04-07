@@ -9,15 +9,17 @@
     main { max-width: 980px; margin: 20px auto; padding: 0 12px 20px; }
     h1 { margin-bottom: 10px; }
     .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-    .card { background: #1e293b; border-radius: 12px; padding: 14px; }
+    .card { background: #1e293b; border-radius: 12px; padding: 14px; border: 1px solid #334155; box-shadow: 0 8px 20px rgba(0,0,0,0.25); }
     .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
     .lamp { width: 14px; height: 14px; border-radius: 999px; background: #64748b; }
     .lamp.on { background: #16a34a; box-shadow: 0 0 10px rgba(22, 163, 74, 0.6); }
-    .lamp.off { background: #6b7280; }
+    .lamp.off { background: #9ca3af; }
     .button-row { display: flex; gap: 8px; margin-bottom: 10px; }
     button { border: 0; border-radius: 8px; padding: 8px 10px; color: white; cursor: pointer; }
-    .on-button { background: #16a34a; }
-    .off-button { background: #6b7280; }
+    .on-button { background: #166534; }
+    .on-button.active { background: #22c55e; box-shadow: 0 0 14px rgba(34, 197, 94, 0.75); }
+    .off-button { background: #475569; }
+    .off-button.active { background: #94a3b8; color: #0f172a; }
     .save-button { background: #2563eb; width: 100%; }
     input { width: 100%; box-sizing: border-box; border: 1px solid #334155; border-radius: 8px; padding: 8px; margin-bottom: 8px; background: #0f172a; color: #e2e8f0; }
     #error-text { min-height: 20px; color: #fca5a5; }
@@ -66,7 +68,7 @@
       buttonRowElement.className = "button-row";
 
       const onButtonElement = document.createElement("button");
-      onButtonElement.className = "on-button";
+      onButtonElement.className = singlePortState.power === "on" ? "on-button active" : "on-button";
       onButtonElement.textContent = "ON";
       onButtonElement.disabled = applicationModel.requestInFlight;
       onButtonElement.addEventListener("click", function onPowerOnClick() {
@@ -74,7 +76,7 @@
       });
 
       const offButtonElement = document.createElement("button");
-      offButtonElement.className = "off-button";
+      offButtonElement.className = singlePortState.power === "off" ? "off-button active" : "off-button";
       offButtonElement.textContent = "OFF";
       offButtonElement.disabled = applicationModel.requestInFlight;
       offButtonElement.addEventListener("click", function onPowerOffClick() {
