@@ -14,8 +14,6 @@ import (
 	"strings"
 )
 
-import "github.com/webview/webview"
-
 // =============================
 // Embedded static assets.
 // =============================
@@ -93,15 +91,7 @@ func main() {
 		}
 	}()
 
-	window := webview.New(false)
-	defer window.Destroy()
-	window.SetTitle("DIO/DO Control · ECX-1000-2G")
-	window.SetSize(980, 760, webview.HintNone)
-	window.Navigate("http://localhost" + address)
-
-	log.Printf("webview: window started")
-	window.Run()
-	log.Printf("shutdown: webview stopped")
+	runUserInterface(address)
 }
 
 // =============================
