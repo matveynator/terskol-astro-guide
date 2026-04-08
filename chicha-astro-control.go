@@ -305,7 +305,17 @@ func openURLInExternalBrowser(repositoryURL string) error {
 	}
 
 	openCommand := exec.Command(commandName, commandArguments...)
-	return openCommand.Start()
+	if err := openCommand.Start(); err != nil {
+		return err
+	}
+
+	go func() {
+		if err := openCommand.Wait(); err != nil {
+			log.Printf("repository: external browser command finished with error: %v", err)
+		}
+	}()
+
+	return nil
 }
 
 // =============================
@@ -943,6 +953,14 @@ func handleSetLabel(stateCommands chan<- stateCommand) http.HandlerFunc {
 func writeJSON(writer http.ResponseWriter, payload any) {
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(writer).Encode(payload)
+}
+
+func writeJSONError(writer http.ResponseWriter, statusCode int, message string) {
+	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+	writer.WriteHeader(statusCode)
+	_ = json.NewEncoder(writer).Encode(map[string]string{
+		"error": message,
+	})
 }
 
 // =============================
