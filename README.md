@@ -1,4 +1,4 @@
-# terskol-astro-guide
+# chicha-astro-control
 
 Desktop-приложение на WebView для управления DIO на Vecow ECX-1000-2G.
 
@@ -17,7 +17,17 @@ Desktop-приложение на WebView для управления DIO на V
 ## Запуск
 
 ```bash
-go run terskol-astro-guide.go
+go run .
+```
+
+## Сборка бинарников
+
+```bash
+go build -o chicha-astro-control .
+```
+
+```bash
+GOOS=windows GOARCH=amd64 go build -o chicha-astro-control.exe .
 ```
 
 ## Флаги

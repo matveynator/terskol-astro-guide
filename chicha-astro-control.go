@@ -202,7 +202,7 @@ func main() {
 	}
 	defer window.Destroy()
 
-	window.SetTitle("Обсерватория Терскол: управление GPIO/DIO портами ECX-1000")
+	window.SetTitle("chicha-astro-control")
 	window.SetSize(1120, 760, webview.HintNone)
 	window.Navigate("http://" + address)
 

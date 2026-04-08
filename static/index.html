@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Обсерватория Терскол: управление GPIO/DIO портами ECX-1000</title>
+  <title>chicha-astro-control</title>
   <style>
     :root {
       --background: #0b1020;
@@ -19,7 +19,7 @@
 
     * { box-sizing: border-box; }
     body { margin: 0; font-family: Inter, Segoe UI, Arial, sans-serif; background: linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)), url("/zeiss2000.jpg") center / cover fixed no-repeat, var(--background); color: var(--text); }
-    main { max-width: min(1480px, 100%); margin: 0 auto; padding: clamp(6px, 0.8vw, 10px); display: flex; flex-direction: column; gap: 6px; }
+    main { max-width: min(1480px, 100%); margin: 0 auto; padding: clamp(6px, 0.8vw, 10px); display: flex; flex-direction: column; gap: 6px; min-height: 100vh; }
     #error-text { min-height: 16px; color: #fca5a5; font-size: clamp(10px, 0.85vw, 12px); margin: 0; }
     .layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(6px, 0.8vw, 12px); align-items: start; }
     .panel { background: rgba(18, 26, 47, var(--ui-alpha)); border: 1px solid var(--card-border); border-radius: 12px; padding: 6px; display: flex; flex-direction: column; }
@@ -174,6 +174,16 @@
     @media (max-width: 740px) {
       .channels { grid-template-columns: 1fr; }
     }
+    .repository-footer {
+      margin-top: auto;
+      text-align: center;
+      font-size: 11px;
+      color: var(--muted);
+      padding-top: 8px;
+    }
+    .repository-footer a {
+      color: var(--muted);
+    }
   </style>
 </head>
 <body>
@@ -191,6 +201,9 @@
       <div id="output-grid" class="channels"></div>
     </article>
   </section>
+  <footer class="repository-footer">
+    <a href="https://github.com/matveynator/chicha-astro-control" target="_blank" rel="noopener noreferrer">https://github.com/matveynator/chicha-astro-control</a>
+  </footer>
 </main>
 
 <script>

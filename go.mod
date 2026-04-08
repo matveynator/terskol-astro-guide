@@ -1,4 +1,4 @@
-module terskol-astro-guide
+module chicha-astro-control
 
 go 1.22
 
