@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -177,6 +178,7 @@ func main() {
 	http.HandleFunc("/api/output/power", handleSetOutputPower(stateCommands))
 	http.HandleFunc("/api/output/pwm", handleSetOutputPWM(stateCommands))
 	http.HandleFunc("/api/label", handleSetLabel(stateCommands))
+	http.HandleFunc("/api/open/repository", handleOpenRepository)
 	http.HandleFunc("/", handleRequest)
 
 	address := fmt.Sprintf("127.0.0.1:%d", *portFlag)
@@ -247,6 +249,42 @@ func waitForServerReadiness(address string, timeout time.Duration) {
 
 		time.Sleep(250 * time.Millisecond)
 	}
+}
+
+func handleOpenRepository(responseWriter http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		responseWriter.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	err := openURLInExternalBrowser("https://github.com/matveynator/chicha-astro-control")
+	if err != nil {
+		writeJSONError(responseWriter, http.StatusInternalServerError, "failed to open external browser")
+		log.Printf("repository: open external browser failed: %v", err)
+		return
+	}
+
+	responseWriter.WriteHeader(http.StatusNoContent)
+}
+
+func openURLInExternalBrowser(repositoryURL string) error {
+	var commandName string
+	var commandArguments []string
+
+	switch runtime.GOOS {
+	case "windows":
+		commandName = "cmd"
+		commandArguments = []string{"/c", "start", "", repositoryURL}
+	case "darwin":
+		commandName = "open"
+		commandArguments = []string{repositoryURL}
+	default:
+		commandName = "xdg-open"
+		commandArguments = []string{repositoryURL}
+	}
+
+	openCommand := exec.Command(commandName, commandArguments...)
+	return openCommand.Start()
 }
 
 // =============================

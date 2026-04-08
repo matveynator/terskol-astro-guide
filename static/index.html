@@ -183,6 +183,8 @@
     }
     .repository-footer a {
       color: var(--muted);
+      text-decoration: underline;
+      cursor: pointer;
     }
   </style>
 </head>
@@ -202,7 +204,7 @@
     </article>
   </section>
   <footer class="repository-footer">
-    <a href="https://github.com/matveynator/chicha-astro-control" target="_blank" rel="noopener noreferrer">https://github.com/matveynator/chicha-astro-control</a>
+    <a href="https://github.com/matveynator/chicha-astro-control" id="repository-link">https://github.com/matveynator/chicha-astro-control</a>
   </footer>
 </main>
 
@@ -221,6 +223,12 @@
   const inputGridElement = document.getElementById("input-grid");
   const outputGridElement = document.getElementById("output-grid");
   const errorTextElement = document.getElementById("error-text");
+  const repositoryLinkElement = document.getElementById("repository-link");
+
+  repositoryLinkElement.addEventListener("click", function handleRepositoryLinkClick(clickEvent) {
+    clickEvent.preventDefault();
+    openRepositoryInExternalBrowser();
+  });
 
   function renderFromModel() {
     errorTextElement.textContent = applicationModel.errorText;
@@ -306,6 +314,22 @@
       inputCardElement.appendChild(inputDisplayElement);
       inputGridElement.appendChild(inputCardElement);
     });
+  }
+
+  async function openRepositoryInExternalBrowser() {
+    applicationModel.pendingRequest = true;
+    try {
+      const openRepositoryResponse = await fetch("/api/open/repository", { method: "POST" });
+      if (!openRepositoryResponse.ok) {
+        throw new Error("Не удалось открыть внешний браузер");
+      }
+      applicationModel.errorText = "";
+    } catch (openRepositoryError) {
+      applicationModel.errorText = openRepositoryError.message;
+    } finally {
+      applicationModel.pendingRequest = false;
+      renderFromModel();
+    }
   }
 
   function renderOutputs() {
