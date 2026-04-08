@@ -435,7 +435,6 @@ func updateFrequencyMetric(metric *inputMetric, nextSignal string, currentTime t
 		metric.lastEdgeAt = currentTime
 		metric.lastSignal = nextSignal
 	}
-}
 
 	return metric.lastHz
 }
