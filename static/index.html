@@ -248,8 +248,12 @@
   function updateApplicationScale() {
     applicationRootElement.style.transform = "scale(1)";
 
-    const availableViewportWidth = viewportFitElement.clientWidth;
-    const availableViewportHeight = viewportFitElement.clientHeight;
+    const viewportComputedStyle = window.getComputedStyle(viewportFitElement);
+    const viewportHorizontalPadding = parseFloat(viewportComputedStyle.paddingLeft) + parseFloat(viewportComputedStyle.paddingRight);
+    const viewportVerticalPadding = parseFloat(viewportComputedStyle.paddingTop) + parseFloat(viewportComputedStyle.paddingBottom);
+
+    const availableViewportWidth = viewportFitElement.clientWidth - viewportHorizontalPadding;
+    const availableViewportHeight = viewportFitElement.clientHeight - viewportVerticalPadding;
     const requiredLayoutWidth = applicationRootElement.scrollWidth;
     const requiredLayoutHeight = applicationRootElement.scrollHeight;
 
