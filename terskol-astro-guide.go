@@ -405,20 +405,19 @@ func refreshInputSignals(state *appState, inputMetrics []inputMetric, inputPathT
 func parseInputVoltageAndSignal(rawInputSignal string, config runtimeConfig) (float64, string) {
 	trimmedSignal := strings.TrimSpace(rawInputSignal)
 
-	// Handle digital payloads first so common GPIO values do not get remapped by voltage thresholds.
-	switch trimmedSignal {
-	case "1":
-		return config.inputOnVoltage, "on"
-	case "0":
-		return config.inputOffVoltage, "off"
-	}
-
 	if parsedVoltage, err := strconv.ParseFloat(trimmedSignal, 64); err == nil {
 		nextSignal := "off"
 		if parsedVoltage >= config.inputThresholdVoltage {
 			nextSignal = "on"
 		}
 		return parsedVoltage, nextSignal
+	}
+
+	switch trimmedSignal {
+	case "1":
+		return config.inputOnVoltage, "on"
+	case "0":
+		return config.inputOffVoltage, "off"
 	}
 
 	return config.inputOffVoltage, "off"
