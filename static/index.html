@@ -15,11 +15,37 @@
       --gray: #64748b;
       --blue: #3b82f6;
       --ui-alpha: 0.9;
+      --base-layout-width: 1480px;
+      --base-layout-height: 900px;
+      --app-scale: min(calc(90vw / var(--base-layout-width)), calc(90vh / var(--base-layout-height)));
     }
 
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: Inter, Segoe UI, Arial, sans-serif; background: linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)), url("/zeiss2000.jpg") center / cover fixed no-repeat, var(--background); color: var(--text); }
-    main { max-width: min(1480px, 100%); margin: 0 auto; padding: clamp(6px, 0.8vw, 10px); display: flex; flex-direction: column; gap: 6px; min-height: 100vh; }
+    html, body { width: 100%; height: 100%; }
+    body {
+      margin: 0;
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+      background: linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)), url("/zeiss2000.jpg") center / cover fixed no-repeat, var(--background);
+      color: var(--text);
+      overflow: hidden;
+    }
+    .application-viewport {
+      width: 100vw;
+      height: 100vh;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+    main {
+      width: var(--base-layout-width);
+      height: var(--base-layout-height);
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transform: scale(var(--app-scale));
+      transform-origin: center center;
+    }
     #error-text { min-height: 16px; color: #fca5a5; font-size: clamp(10px, 0.85vw, 12px); margin: 0; }
     .layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(6px, 0.8vw, 12px); align-items: start; }
     .panel { background: rgba(18, 26, 47, var(--ui-alpha)); border: 1px solid var(--card-border); border-radius: 12px; padding: 6px; display: flex; flex-direction: column; }
@@ -167,13 +193,6 @@
       padding: 0 8px;
       font-size: 13px;
     }
-    @media (max-width: 1080px) {
-      .layout { grid-template-columns: 1fr; }
-      .channels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    }
-    @media (max-width: 740px) {
-      .channels { grid-template-columns: 1fr; }
-    }
     .repository-footer {
       margin-top: auto;
       text-align: center;
@@ -189,24 +208,26 @@
   </style>
 </head>
 <body>
-<main>
-  <p id="error-text"></p>
+<div class="application-viewport">
+  <main>
+    <p id="error-text"></p>
 
-  <section class="layout">
-    <article class="panel">
-      <h2>Датчики (реальные пины 1..8)</h2>
-      <div id="input-grid" class="channels"></div>
-    </article>
+    <section class="layout">
+      <article class="panel">
+        <h2>Датчики (реальные пины 1..8)</h2>
+        <div id="input-grid" class="channels"></div>
+      </article>
 
-    <article class="panel">
-      <h2>Управление оборудованием (реальные пины 11..18)</h2>
-      <div id="output-grid" class="channels"></div>
-    </article>
-  </section>
-  <footer class="repository-footer">
-    <a href="https://github.com/matveynator/chicha-astro-control" id="repository-link">https://github.com/matveynator/chicha-astro-control</a>
-  </footer>
-</main>
+      <article class="panel">
+        <h2>Управление оборудованием (реальные пины 11..18)</h2>
+        <div id="output-grid" class="channels"></div>
+      </article>
+    </section>
+    <footer class="repository-footer">
+      <a href="https://github.com/matveynator/chicha-astro-control" id="repository-link">https://github.com/matveynator/chicha-astro-control</a>
+    </footer>
+  </main>
+</div>
 
 <script>
   const applicationModel = {
