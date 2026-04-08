@@ -151,7 +151,6 @@
       min-height: 30px;
     }
     .output-label-title { font-size: clamp(11px, 1vw, 14px); font-weight: 700; text-transform: uppercase; max-width: 78%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .port-title { font-size: clamp(10px, 0.8vw, 12px); color: var(--muted); margin-left: 14px; }
     .output-header-actions { display: flex; gap: 6px; }
     .output-name-editor {
       display: flex;
@@ -223,7 +222,6 @@
       const inputState = applicationModel.inputsByChannel[inputChannel];
       const inputLabelDraft = applicationModel.editingInputLabelsByChannel[inputChannel];
       const isEditingInputLabel = Object.prototype.hasOwnProperty.call(applicationModel.editingInputLabelsByChannel, inputChannel);
-      const inputPinCode = "DI" + String(inputChannel);
 
       const inputCardElement = document.createElement("article");
       inputCardElement.className = "channel-card";
@@ -277,10 +275,6 @@
         inputHeaderRowElement.appendChild(editInputNameButtonElement);
         inputDisplayElement.appendChild(inputHeaderRowElement);
 
-        const inputPortTitleElement = document.createElement("div");
-        inputPortTitleElement.className = "port-title";
-        inputPortTitleElement.textContent = inputPinCode;
-        inputDisplayElement.appendChild(inputPortTitleElement);
       }
 
       const inputVoltageLineElement = document.createElement("div");
@@ -318,7 +312,6 @@
 
       const isEditingOutputLabel = Object.prototype.hasOwnProperty.call(applicationModel.editingOutputLabelsByChannel, outputChannel);
       const outputDraftLabel = isEditingOutputLabel ? applicationModel.editingOutputLabelsByChannel[outputChannel] : outputState.label;
-      const outputPinCode = "DO" + String(outputChannel + 10);
 
       if (isEditingOutputLabel) {
         const outputNameEditorElement = document.createElement("div");
@@ -368,10 +361,6 @@
         outputHeaderRowElement.appendChild(outputHeaderActionsElement);
         outputDisplayElement.appendChild(outputHeaderRowElement);
 
-        const outputPortTitleElement = document.createElement("div");
-        outputPortTitleElement.className = "port-title";
-        outputPortTitleElement.textContent = outputPinCode;
-        outputDisplayElement.appendChild(outputPortTitleElement);
       }
 
       const buttonsRowElement = document.createElement("div");

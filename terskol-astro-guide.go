@@ -313,7 +313,7 @@ func buildInitialState(savedLabels map[string]string, savedOutputs map[int]saved
 		labelKey := "input-" + strconv.Itoa(channelIndex)
 		label := strings.TrimSpace(savedLabels[labelKey])
 		if label == "" {
-			label = fmt.Sprintf("DI%d", channelIndex)
+			label = defaultInputLabel(channelIndex)
 		}
 
 		inputs = append(inputs, inputState{Channel: channelIndex, Signal: "off", Voltage: "0.0V", Hz: "0.00 Hz", Label: label})
@@ -324,7 +324,7 @@ func buildInitialState(savedLabels map[string]string, savedOutputs map[int]saved
 		labelKey := "output-" + strconv.Itoa(channelIndex)
 		label := strings.TrimSpace(savedLabels[labelKey])
 		if label == "" {
-			label = fmt.Sprintf("DO%d", channelIndex+10)
+			label = defaultOutputLabel(channelIndex)
 		}
 
 		initialPower := "off"
@@ -382,9 +382,6 @@ func applyOutputPWM(state appState, channel int, nextPWM int) (appState, error) 
 
 func applyLabel(state appState, target string, channel int, nextLabel string) (appState, error) {
 	sanitizedLabel := strings.TrimSpace(nextLabel)
-	if sanitizedLabel == "" {
-		return state, errors.New("label is required")
-	}
 
 	nextState := cloneState(state)
 	switch target {
@@ -392,10 +389,16 @@ func applyLabel(state appState, target string, channel int, nextLabel string) (a
 		if channel < 1 || channel > inputCount {
 			return state, errors.New("invalid input channel")
 		}
+		if sanitizedLabel == "" {
+			sanitizedLabel = defaultInputLabel(channel)
+		}
 		nextState.Inputs[channel-1].Label = sanitizedLabel
 	case "output":
 		if channel < 1 || channel > outputCount {
 			return state, errors.New("invalid output channel")
+		}
+		if sanitizedLabel == "" {
+			sanitizedLabel = defaultOutputLabel(channel)
 		}
 		nextState.Outputs[channel-1].Label = sanitizedLabel
 	default:
@@ -403,6 +406,14 @@ func applyLabel(state appState, target string, channel int, nextLabel string) (a
 	}
 
 	return nextState, nil
+}
+
+func defaultInputLabel(channel int) string {
+	return fmt.Sprintf("DI%d", channel)
+}
+
+func defaultOutputLabel(channel int) string {
+	return fmt.Sprintf("DO%d", channel+10)
 }
 
 func cloneState(source appState) appState {

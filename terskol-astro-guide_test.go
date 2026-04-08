@@ -84,3 +84,26 @@ func TestApplyOutputPowerKeepsPWMValueWhenDisabled(t *testing.T) {
 		t.Fatalf("expected pwm to remain 37, got %d", nextState.Outputs[0].PWM)
 	}
 }
+
+func TestApplyLabelUsesDefaultPinLabelWhenInputIsBlank(t *testing.T) {
+	initialState := appState{
+		Inputs:  []inputState{{Channel: 1, Label: "MySensor"}},
+		Outputs: []outputState{{Channel: 1, Label: "MyOutput"}},
+	}
+
+	nextInputState, inputErr := applyLabel(initialState, "input", 1, "")
+	if inputErr != nil {
+		t.Fatalf("expected no error for empty input label, got %v", inputErr)
+	}
+	if nextInputState.Inputs[0].Label != "DI1" {
+		t.Fatalf("expected input label DI1, got %q", nextInputState.Inputs[0].Label)
+	}
+
+	nextOutputState, outputErr := applyLabel(initialState, "output", 1, "   ")
+	if outputErr != nil {
+		t.Fatalf("expected no error for empty output label, got %v", outputErr)
+	}
+	if nextOutputState.Outputs[0].Label != "DO11" {
+		t.Fatalf("expected output label DO11, got %q", nextOutputState.Outputs[0].Label)
+	}
+}
