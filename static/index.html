@@ -415,10 +415,7 @@
       const pwmScaleLeftElement = document.createElement("span");
       pwmScaleLeftElement.textContent = "0.0V";
       const pwmScaleRightElement = document.createElement("span");
-      pwmScaleRightElement.textContent = formatOutputVoltage(outputState.pwm);
-      pwmSliderElement.addEventListener("input", function handlePWMLiveText() {
-        pwmScaleRightElement.textContent = formatOutputVoltage(Number(pwmSliderElement.value));
-      });
+      pwmScaleRightElement.textContent = "3.3V";
 
       pwmRowElement.appendChild(pwmSliderElement);
       pwmScaleRowElement.appendChild(pwmScaleLeftElement);
