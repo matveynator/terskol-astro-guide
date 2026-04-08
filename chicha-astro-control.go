@@ -277,7 +277,7 @@ func openURLInExternalBrowser(repositoryURL string) error {
 		commandArguments = []string{"/c", "start", "", repositoryURL}
 	case "darwin":
 		commandName = "open"
-		commandArguments = []string{repositoryURL}
+		commandArguments = []string{"-n", repositoryURL}
 	default:
 		commandName = "xdg-open"
 		commandArguments = []string{repositoryURL}
