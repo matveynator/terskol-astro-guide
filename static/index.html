@@ -18,8 +18,10 @@
     }
 
     * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
     body { margin: 0; font-family: Inter, Segoe UI, Arial, sans-serif; background: linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)), url("/zeiss2000.jpg") center / cover fixed no-repeat, var(--background); color: var(--text); }
-    main { max-width: min(1480px, 100%); margin: 0 auto; padding: clamp(6px, 0.8vw, 10px); display: flex; flex-direction: column; gap: 6px; min-height: 100vh; }
+    #viewport-fit { width: 100vw; height: 100vh; overflow: hidden; display: flex; justify-content: center; align-items: flex-start; padding: clamp(4px, 0.5vw, 8px); }
+    main { width: 1480px; margin: 0 auto; padding: clamp(6px, 0.8vw, 10px); display: flex; flex-direction: column; gap: 6px; transform-origin: top center; }
     #error-text { min-height: 16px; color: #fca5a5; font-size: clamp(10px, 0.85vw, 12px); margin: 0; }
     .layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(6px, 0.8vw, 12px); align-items: start; }
     .panel { background: rgba(18, 26, 47, var(--ui-alpha)); border: 1px solid var(--card-border); border-radius: 12px; padding: 6px; display: flex; flex-direction: column; }
@@ -189,7 +191,8 @@
   </style>
 </head>
 <body>
-<main>
+<div id="viewport-fit">
+<main id="application-root">
   <p id="error-text"></p>
 
   <section class="layout">
@@ -207,6 +210,7 @@
     <a href="https://github.com/matveynator/chicha-astro-control" id="repository-link">https://github.com/matveynator/chicha-astro-control</a>
   </footer>
 </main>
+</div>
 
 <script>
   const applicationModel = {
@@ -220,6 +224,8 @@
   };
   const outputMaxVoltage = 3.3;
 
+  const viewportFitElement = document.getElementById("viewport-fit");
+  const applicationRootElement = document.getElementById("application-root");
   const inputGridElement = document.getElementById("input-grid");
   const outputGridElement = document.getElementById("output-grid");
   const errorTextElement = document.getElementById("error-text");
@@ -230,10 +236,34 @@
     openRepositoryInExternalBrowser();
   });
 
+  window.addEventListener("resize", updateApplicationScale);
+
   function renderFromModel() {
     errorTextElement.textContent = applicationModel.errorText;
     renderInputs();
     renderOutputs();
+    updateApplicationScale();
+  }
+
+  function updateApplicationScale() {
+    applicationRootElement.style.transform = "scale(1)";
+
+    const viewportComputedStyle = window.getComputedStyle(viewportFitElement);
+    const viewportHorizontalPadding = parseFloat(viewportComputedStyle.paddingLeft) + parseFloat(viewportComputedStyle.paddingRight);
+    const viewportVerticalPadding = parseFloat(viewportComputedStyle.paddingTop) + parseFloat(viewportComputedStyle.paddingBottom);
+
+    const availableViewportWidth = viewportFitElement.clientWidth - viewportHorizontalPadding;
+    const availableViewportHeight = viewportFitElement.clientHeight - viewportVerticalPadding;
+    const requiredLayoutWidth = applicationRootElement.scrollWidth;
+    const requiredLayoutHeight = applicationRootElement.scrollHeight;
+
+    const proportionalScale = Math.min(
+      availableViewportWidth / requiredLayoutWidth,
+      availableViewportHeight / requiredLayoutHeight,
+      1
+    );
+
+    applicationRootElement.style.transform = "scale(" + proportionalScale + ")";
   }
 
   function renderInputs() {
