@@ -38,8 +38,7 @@ var (
 	dioLinuxInputPathTemplate  = flag.String("dio-linux-input-path-template", "/sys/class/gpio/gpio%d/value", "Linux DIO input file path template")
 	dioWindowsOutputPathFlag   = flag.String("dio-windows-output-path-template", `C:\Vecow\ECX1K\do%d.value`, "Windows DIO output file path template")
 	dioWindowsInputPathFlag    = flag.String("dio-windows-input-path-template", `C:\Vecow\ECX1K\di%d.value`, "Windows DIO input file path template")
-	labelsFileFlag             = flag.String("labels-file", "dio-labels.json", "path to labels file")
-	outputsFileFlag            = flag.String("outputs-file", "dio-outputs.json", "path to output power and pwm state file")
+	settingsFileFlag           = flag.String("settings-file", "", "path to settings json file")
 	inputOnVoltageFlag         = flag.Float64("input-on-voltage", 24.0, "voltage value used when DI source is digital and signal is active")
 	inputOffVoltageFlag        = flag.Float64("input-off-voltage", 0.0, "voltage value used when DI source is digital and signal is inactive")
 	inputThresholdVoltageFlag  = flag.Float64("input-threshold-voltage", 2.0, "threshold used to map numeric DI voltage to on/off signal")
@@ -109,6 +108,11 @@ type savedOutputState struct {
 	PWM     int    `json:"pwm"`
 }
 
+type persistedSettings struct {
+	Labels  map[string]string  `json:"labels"`
+	Outputs []savedOutputState `json:"outputs"`
+}
+
 type inputMetric struct {
 	lastSignal string
 	lastEdgeAt time.Time
@@ -153,6 +157,10 @@ func main() {
 
 	stateCommands := make(chan stateCommand)
 	outputPWMController := startPWMController(resolvedIOPaths.outputTemplate, *pwmFrequencyFlag)
+	settingsFile, err := resolveSettingsFilePath(*settingsFileFlag)
+	if err != nil {
+		log.Fatalf("startup: settings path resolve failed: %v", err)
+	}
 	go runStateOwner(
 		stateCommands,
 		resolvedIOPaths,
@@ -161,8 +169,7 @@ func main() {
 			inputOffVoltage:       *inputOffVoltageFlag,
 			inputThresholdVoltage: *inputThresholdVoltageFlag,
 		},
-		*labelsFileFlag,
-		*outputsFileFlag,
+		settingsFile,
 		outputPWMController,
 	)
 
@@ -246,8 +253,9 @@ func waitForServerReadiness(address string, timeout time.Duration) {
 // State owner goroutine.
 // =============================
 
-func runStateOwner(stateCommands <-chan stateCommand, resolvedIOPaths ioPaths, config runtimeConfig, labelsFile string, outputsFile string, outputPWMController *pwmController) {
-	state := buildInitialState(loadLabels(labelsFile), loadOutputs(outputsFile))
+func runStateOwner(stateCommands <-chan stateCommand, resolvedIOPaths ioPaths, config runtimeConfig, settingsFile string, outputPWMController *pwmController) {
+	loadedSettings := loadSettings(settingsFile)
+	state := buildInitialState(loadedSettings.Labels, indexOutputsByChannel(loadedSettings.Outputs))
 	for _, configuredOutput := range state.Outputs {
 		outputPWMController.Apply(configuredOutput)
 	}
@@ -266,7 +274,7 @@ func runStateOwner(stateCommands <-chan stateCommand, resolvedIOPaths ioPaths, c
 				command.reply <- stateReply{state: cloneState(state), err: err}
 				continue
 			}
-			if err := saveOutputs(outputsFile, nextState); err != nil {
+			if err := saveSettings(settingsFile, nextState); err != nil {
 				command.reply <- stateReply{state: cloneState(state), err: err}
 				continue
 			}
@@ -280,7 +288,7 @@ func runStateOwner(stateCommands <-chan stateCommand, resolvedIOPaths ioPaths, c
 				command.reply <- stateReply{state: cloneState(state), err: err}
 				continue
 			}
-			if err := saveOutputs(outputsFile, nextState); err != nil {
+			if err := saveSettings(settingsFile, nextState); err != nil {
 				command.reply <- stateReply{state: cloneState(state), err: err}
 				continue
 			}
@@ -294,7 +302,7 @@ func runStateOwner(stateCommands <-chan stateCommand, resolvedIOPaths ioPaths, c
 				command.reply <- stateReply{state: cloneState(state), err: err}
 				continue
 			}
-			if err := saveLabels(labelsFile, nextState); err != nil {
+			if err := saveSettings(settingsFile, nextState); err != nil {
 				command.reply <- stateReply{state: cloneState(state), err: err}
 				continue
 			}
@@ -675,40 +683,81 @@ func readInputSignal(channel int, inputPathTemplate string) (string, error) {
 	return strings.TrimSpace(string(rawSignal)), nil
 }
 
-func loadLabels(labelsFile string) map[string]string {
-	fileData, err := os.ReadFile(labelsFile)
-	if err != nil {
-		return map[string]string{}
+func resolveSettingsFilePath(explicitSettingsFile string) (string, error) {
+	trimmedSettingsPath := strings.TrimSpace(explicitSettingsFile)
+	if trimmedSettingsPath != "" {
+		return trimmedSettingsPath, ensureSettingsFile(trimmedSettingsPath)
 	}
 
-	var labels map[string]string
-	if err := json.Unmarshal(fileData, &labels); err != nil {
-		return map[string]string{}
+	applicationName := filepath.Base(os.Args[0])
+	applicationExtension := filepath.Ext(applicationName)
+	if applicationExtension != "" {
+		applicationName = strings.TrimSuffix(applicationName, applicationExtension)
+	}
+	if applicationName == "" {
+		applicationName = "app"
 	}
 
-	return labels
+	settingsDirectory := ""
+	if runtime.GOOS == "windows" {
+		settingsDirectory = `C:/appname.conf`
+	} else {
+		homeDirectory, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		settingsDirectory = filepath.Join(homeDirectory, ".appname.conf")
+	}
+
+	settingsFile := filepath.Join(settingsDirectory, applicationName+".json")
+	return settingsFile, ensureSettingsFile(settingsFile)
 }
 
-func loadOutputs(outputsFile string) map[int]savedOutputState {
-	fileData, err := os.ReadFile(outputsFile)
+func ensureSettingsFile(settingsFile string) error {
+	settingsDirectory := filepath.Dir(settingsFile)
+	if err := os.MkdirAll(settingsDirectory, 0o755); err != nil {
+		return err
+	}
+
+	if _, err := os.Stat(settingsFile); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	return os.WriteFile(settingsFile, []byte("{}\n"), 0o644)
+}
+
+func loadSettings(settingsFile string) persistedSettings {
+	fileData, err := os.ReadFile(settingsFile)
 	if err != nil {
-		return map[int]savedOutputState{}
+		return persistedSettings{Labels: map[string]string{}, Outputs: []savedOutputState{}}
 	}
 
-	var savedOutputs []savedOutputState
-	if err := json.Unmarshal(fileData, &savedOutputs); err != nil {
-		return map[int]savedOutputState{}
+	var settings persistedSettings
+	if err := json.Unmarshal(fileData, &settings); err != nil {
+		return persistedSettings{Labels: map[string]string{}, Outputs: []savedOutputState{}}
 	}
 
+	if settings.Labels == nil {
+		settings.Labels = map[string]string{}
+	}
+	if settings.Outputs == nil {
+		settings.Outputs = []savedOutputState{}
+	}
+
+	return settings
+}
+
+func indexOutputsByChannel(savedOutputs []savedOutputState) map[int]savedOutputState {
 	outputsByChannel := make(map[int]savedOutputState, len(savedOutputs))
 	for _, singleOutput := range savedOutputs {
 		outputsByChannel[singleOutput.Channel] = singleOutput
 	}
-
 	return outputsByChannel
 }
 
-func saveLabels(labelsFile string, state appState) error {
+func saveSettings(settingsFile string, state appState) error {
 	labels := map[string]string{}
 	for _, singleInput := range state.Inputs {
 		labels["input-"+strconv.Itoa(singleInput.Channel)] = singleInput.Label
@@ -717,15 +766,6 @@ func saveLabels(labelsFile string, state appState) error {
 		labels["output-"+strconv.Itoa(singleOutput.Channel)] = singleOutput.Label
 	}
 
-	fileData, err := json.MarshalIndent(labels, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(labelsFile, fileData, 0o644)
-}
-
-func saveOutputs(outputsFile string, state appState) error {
 	savedOutputs := make([]savedOutputState, 0, len(state.Outputs))
 	for _, singleOutput := range state.Outputs {
 		savedOutputs = append(savedOutputs, savedOutputState{
@@ -735,12 +775,13 @@ func saveOutputs(outputsFile string, state appState) error {
 		})
 	}
 
-	fileData, err := json.MarshalIndent(savedOutputs, "", "  ")
+	settings := persistedSettings{Labels: labels, Outputs: savedOutputs}
+	fileData, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(outputsFile, fileData, 0o644)
+	return os.WriteFile(settingsFile, fileData, 0o644)
 }
 
 // =============================

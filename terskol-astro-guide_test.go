@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestParseInputVoltageAndSignalDigitalTokensUseDigitalMapping(t *testing.T) {
 	config := runtimeConfig{
@@ -150,5 +153,26 @@ func TestApplyOutputPWMDoesNotTogglePowerState(t *testing.T) {
 	}
 	if onUpdatedState.Outputs[0].PWM != 55 {
 		t.Fatalf("expected on state pwm 55, got %d", onUpdatedState.Outputs[0].PWM)
+	}
+}
+
+func TestResolveSettingsFilePathCreatesExplicitSettingsFile(t *testing.T) {
+	temporaryDirectory := t.TempDir()
+	settingsFile := filepath.Join(temporaryDirectory, "custom-settings.json")
+
+	resolvedSettingsFile, resolveError := resolveSettingsFilePath(settingsFile)
+	if resolveError != nil {
+		t.Fatalf("expected no resolve error, got %v", resolveError)
+	}
+	if resolvedSettingsFile != settingsFile {
+		t.Fatalf("expected settings path %q, got %q", settingsFile, resolvedSettingsFile)
+	}
+
+	loadedSettings := loadSettings(settingsFile)
+	if len(loadedSettings.Labels) != 0 {
+		t.Fatalf("expected empty labels map, got %v", loadedSettings.Labels)
+	}
+	if len(loadedSettings.Outputs) != 0 {
+		t.Fatalf("expected empty outputs list, got %v", loadedSettings.Outputs)
 	}
 }
