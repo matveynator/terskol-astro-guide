@@ -94,8 +94,9 @@ type ioPaths struct {
 }
 
 type runtimeState struct {
-	TestMode bool   `json:"test_mode"`
-	Message  string `json:"message"`
+	TestMode   bool   `json:"test_mode"`
+	Message    string `json:"message"`
+	MessageKey string `json:"message_key"`
 }
 
 type ioRuntimeMode struct {
@@ -193,7 +194,7 @@ func main() {
 	}
 	defer window.Destroy()
 
-	window.SetTitle("Обсерватория Терскол: chicha-astro-control")
+	window.SetTitle("chicha-astro-control")
 	window.SetSize(1120, 760, webview.HintNone)
 	window.Navigate("http://" + address)
 
@@ -264,13 +265,15 @@ func detectIORuntimeMode(resolvedIOPaths ioPaths) ioRuntimeMode {
 
 	if mode.inputSimulation || mode.outputSimulation {
 		mode.state = runtimeState{
-			TestMode: true,
-			Message:  "Порты GPIO/DIO недоступны. Укажите пути флагами -DI и -DO. Работаем в демо-режиме.",
+			TestMode:   true,
+			Message:    "",
+			MessageKey: "runtime_demo_mode",
 		}
 	} else {
 		mode.state = runtimeState{
-			TestMode: false,
-			Message:  "",
+			TestMode:   false,
+			Message:    "",
+			MessageKey: "",
 		}
 	}
 

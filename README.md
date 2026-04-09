@@ -1,98 +1,115 @@
-# chicha-astro-control
+# chicha-astro-control wiki (RU)
 
-WebView desktop app for monitoring DI and controlling DO channels on Vecow-class DIO hosts.
+## Назначение
+`chicha-astro-control` — desktop-приложение на Go + WebView для мониторинга дискретных входов DI и управления дискретными выходами DO на платформах Vecow-класса.
 
-## 1) What the app does
+## Что делает приложение
+- Показывает 8 входов `DI1..DI8` в реальном времени.
+- Управляет 8 выходами `DO11..DO18`:
+  - ON/OFF;
+  - software PWM (`0..100`).
+- Сохраняет пользовательские подписи каналов и состояние выходов в JSON-конфиг.
+- Открывает ссылку репозитория во внешнем браузере.
 
-- Shows 8 DI channels (`DI1..DI8`) with:
-  - signal state (`on` / `off`)
-  - measured voltage text
-  - estimated signal frequency (Hz)
-- Controls 8 DO channels (`DO1..DO8`) with:
-  - power state (`on` / `off`)
-  - PWM duty (`0..100%`)
-- Stores channel labels and output state in a JSON config file.
-- Opens repository link from UI in external system browser.
+## Локализация интерфейса
+Поддерживаются языки:
+- русский (`ru`)
+- английский (`en`)
+- немецкий (`de`)
+- французский (`fr`)
+- японский (`ja`)
+- украинский (`uk`)
 
-Pin mapping used in UI:
-- `DI1..DI8` → terminal block pins `1..8`
-- `DO1..DO8` → terminal block pins `11..18`
+Как это работает:
+1. Переводы хранятся в `static/translations.json`.
+2. Файл встроен в бинарник через Go `embed` (папка `static/*`).
+3. На старте UI выбирается язык по настройкам ОС (`navigator.languages` / `navigator.language`).
+4. Если язык не поддерживается, выбирается английский (`en`) по умолчанию.
 
+Переведены все основные элементы интерфейса:
+- заголовки;
+- подписи/подсказки;
+- статусные сообщения;
+- тексты окон/панелей;
+- подсказки по пинам и форматам таймера.
 
-## 2) Linux & MacOS:
-
+## Сборка
+### Linux / macOS
 ```bash
-go build -o /usr/local/bin/chicha-astro-control chicha-astro-control.go; chmod +x /usr/local/bin/chicha-astro-control; chicha-astro-control; 
+go build -o /usr/local/bin/chicha-astro-control chicha-astro-control.go
+chmod +x /usr/local/bin/chicha-astro-control
+chicha-astro-control
 ```
 
-## 3) Windows:
-
+### Windows
 ```bash
 GOOS=windows GOARCH=amd64 go build -ldflags="-H windowsgui" -o chicha-astro-control.exe chicha-astro-control.go
 ```
 
-## 4) Optional runtime flags
+## Параметры запуска
+- `-DI` — шаблон пути к DI (`%d` обязателен)
+- `-DO` — шаблон пути к DO (`%d` обязателен)
+- `-config` — путь к JSON-файлу настроек
 
-Only three flags are supported:
-
-- `-DI` — DI path template with `%d`
-- `-DO` — DO path template with `%d`
-- `-config` — path to JSON settings file
-
-
-## 5) If `-DI`/`-DO` are not provided, defaults depend on OS:
-
+## Значения по умолчанию
 - Linux: `/sys/class/gpio/gpio%d/value`
-- Windows: `C:\Vecow\ECX1K\di%d.value` and `C:\Vecow\ECX1K\do%d.value`
-- macOS: `/tmp/astro-control/di%d.value` and `/tmp/astro-control/do%d.value`
+- Windows: `C:\Vecow\ECX1K\di%d.value` и `C:\Vecow\ECX1K\do%d.value`
+- macOS: `/tmp/astro-control/di%d.value` и `/tmp/astro-control/do%d.value`
 
-## 6) Hardware notes
+## Быстрая памятка по пинам
+- `DI1..DI8` → пины `1..8`
+- `DI_COM` → пин `9`
+- `DIO_GND` → пины `10` и `19`
+- `DO11..DO18` → пины `11..18`
+- `External VDC` → пин `20`
 
-- DI and DO directions are treated as fixed runtime roles.
-- Output voltage visualization uses a `0.0V..3.3V` scale derived from PWM duty.
+## Watchdog (таймер автосброса канала)
+В интерфейсе у каждого DO-канала есть таймер. Он работает как watchdog для выхода:
+- при включении канала (`ON`) запускается обратный отсчёт;
+- после истечения времени приложение автоматически отправляет обратную команду (`OFF`);
+- если канал выключить вручную раньше, отсчёт для этого канала очищается.
 
-## 7) Wiki: ECX-1000-2G DIO/GPIO quick reference
+### Как пользоваться watchdog пошагово
+1. Выберите нужный DO-канал.
+2. Нажмите кнопку редактирования таймера (`✎`) рядом с полем времени.
+3. Введите длительность и сохраните (`💾`).
+4. Нажмите `ON` для запуска канала.
+5. Дождитесь завершения отсчёта — канал автоматически вернётся в противоположное состояние.
 
-This section is a compact wiring-oriented wiki for operators.
+### Поддерживаемые форматы длительности
+- `ns`, `ms`, `s`, `m`, `h`, `d`, `M`, `y`
+- Примеры: `500ms`, `0.5s`, `15s`, `2m`, `1h`
+- Для `m/h/d/M/y` значение округляется вверх до целой секунды.
+- Пустое значение интерпретируется как `0s` (watchdog фактически выключен).
 
-### 7.1 What is available on ECX-1000-2G
+### Практические рекомендации
+- Для реле и силовых цепей начинайте с коротких интервалов (`1s..5s`) на тестовом стенде.
+- Для аварийной логики используйте watchdog как защиту от «залипания» канала в `ON`.
+- Проверяйте, что у нагрузки корректно подключён общий `GND` (пины `19/10`) и внешнее питание `VDC` (пин `20`).
 
-- ECX-1000 series documentation includes both **Isolated DIO** and **GPIO** sections.
-- ECX-1000-2G model sheets are typically marked as **16 GPIO** variant.
-- Always verify the exact SKU and rear-panel labeling before wiring.
 
-### 7.2 Capabilities matrix (practical)
+## Описание промышленного компьютера и драйверы
 
-| Feature | Isolated DIO variant | GPIO variant |
-|---|---|---|
-| Signal type | Industrial isolated DI/DO | 3.3V logic GPIO |
-| Direction | DI and DO fixed by hardware | Configurable by driver/API |
-| Read input | High/Low state | High/Low state |
-| Output control | High/Low state | High/Low state |
-| Hardware PWM on pin | Not documented as native feature | Not documented as native feature |
-| Hardware interrupt on pin | Not documented in DIO API | Not documented in public DIO/GPIO API |
+### Платформа
+Для проекта используется промышленный компьютер класса **Vecow ECX-1000** с дискретными линиями DIO/GPIO.
 
-### 7.3 Wiring guidance for Isolated DIO connector (20-pin)
+- Страница серии ECX-1000 (описание платформы, интерфейсы, спецификация):
+  - https://www.vecow.com/dispPageBox/vecow/VecowCT01.aspx?ddsPageID=ECX1000_EN
+- Общий раздел загрузок/поддержки Vecow (драйверы, BIOS, SDK):
+  - https://www.vecow.com/dispPageBox/vecow/VecowCP.aspx?ddsPageID=Download
 
-- **Pins 1..8**: DI inputs.
-- **Pin 9**: DI_COM (common for DI group).
-- **Pin 10 and Pin 19**: DIO_GND (common ground).
-- **Pins 11..18**: DO outputs.
-- **Pin 20**: External VDC feed for DIO domain.
+### Что важно по драйверам
+1. Сверяйте точную модель/ревизию устройства перед установкой (ECX-1000, ECX-1000-2G и т.д.).
+2. Ставьте драйверы и утилиты только под нужную ОС и версию ядра/Windows.
+3. После установки проверяйте доступность DIO путей (`-DI`/`-DO`) и права доступа.
+4. Для Linux/WebView-сборки требуются системные GUI-библиотеки (GTK/WebKit).
 
-NPN/PNP reminder:
-- **NPN (sink)**: DI_COM to `+V`, DI activates when pulled to `V-`.
-- **PNP (source)**: DI_COM to `V-`, DI activates when `+V` is applied to DI pin.
+### Примечание по сборке под Linux (WebView)
+Если при сборке появляется ошибка вида:
+`build constraints exclude all Go files in github.com/webview/webview_go`,
+обычно это означает, что окружение/теги сборки не удовлетворяют требованиям пакета WebView.
 
-### 7.4 About PWM and voltage measurement in this app
-
-- The app exposes a PWM slider for DO channels by software toggling (duty-cycle emulation).
-- This is convenient for integration tests, but it is not proof of native hardware PWM on DIO pins.
-- DI read path is digital state-oriented; exact analog voltage measurement is not guaranteed by DIO API.
-
-### 7.5 Safe commissioning checklist
-
-1. Confirm the exact SKU (`-2G` or isolated DIO variant) in product label/BOM.
-2. Confirm NPN/PNP scheme before energizing pin 20.
-3. Tie commons correctly: DI_COM (pin 9), DIO_GND (pin 19/10).
-4. Start from simple ON/OFF validation for each channel before automation.
+Практически:
+- проверяйте `CGO_ENABLED=1` для GUI-сборок;
+- устанавливайте dev-пакеты `gtk+-3.0` и `webkit2gtk`;
+- кросс-сборку GUI-приложения лучше делать в целевой Linux-среде с нужными зависимостями.
