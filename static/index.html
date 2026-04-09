@@ -412,7 +412,9 @@
     reverseToggleProcessing: false,
     websocketConnected: false,
     outputControlInFlightByChannel: {},
-    outputLastAppliedAtByChannel: {}
+    outputLastAppliedAtByChannel: {},
+    lastStateSignature: "",
+    lastRenderedCountdownSecondByChannel: {}
   };
   const outputMaxVoltage = 3.3;
 
@@ -983,6 +985,11 @@
       return;
     }
 
+    const nextStateSignature = JSON.stringify(serverState);
+    if (!mustForceApply && nextStateSignature === applicationModel.lastStateSignature) {
+      return;
+    }
+
     const nextInputsByChannel = {};
     serverState.inputs.forEach(function registerInput(inputState) {
       nextInputsByChannel[inputState.channel] = inputState;
@@ -998,6 +1005,7 @@
     syncTimerDefaultsWithOutputs(nextOutputsByChannel);
     clearEndedCountdowns(nextOutputsByChannel);
     applicationModel.errorText = "";
+    applicationModel.lastStateSignature = nextStateSignature;
     renderFromModel();
   }
 
@@ -1328,6 +1336,7 @@
     const parsedTimerSpec = parseDurationSpec(timerSpec);
     if (!parsedTimerSpec.ok || parsedTimerSpec.milliseconds <= 0) {
       delete applicationModel.timerCountdownDeadlineByChannel[outputChannel];
+      delete applicationModel.lastRenderedCountdownSecondByChannel[outputChannel];
       return;
     }
 
@@ -1370,10 +1379,32 @@
       });
       void processReverseToggleQueue();
 
-      if (!hasActiveEditing()) {
+      if (!hasActiveEditing() && shouldRenderCountdownTick()) {
         renderFromModel();
       }
     }, 200);
+  }
+
+  function shouldRenderCountdownTick() {
+    const countdownChannels = Object.keys(applicationModel.timerCountdownDeadlineByChannel);
+    if (countdownChannels.length === 0) {
+      return false;
+    }
+
+    let hasVisualChange = false;
+    countdownChannels.forEach(function evaluateCountdownChannel(channelKey) {
+      const countdownState = applicationModel.timerCountdownDeadlineByChannel[channelKey];
+      if (!countdownState) {
+        return;
+      }
+      const secondsRemaining = Math.max(0, Math.ceil((countdownState.deadlineAtMs - Date.now()) / 1000));
+      if (applicationModel.lastRenderedCountdownSecondByChannel[channelKey] !== secondsRemaining) {
+        applicationModel.lastRenderedCountdownSecondByChannel[channelKey] = secondsRemaining;
+        hasVisualChange = true;
+      }
+    });
+
+    return hasVisualChange;
   }
 
   async function processReverseToggleQueue() {
@@ -1414,18 +1445,21 @@
       const outputState = outputsByChannel[channelKey];
       if (!outputState) {
         delete applicationModel.timerCountdownDeadlineByChannel[channelKey];
+        delete applicationModel.lastRenderedCountdownSecondByChannel[channelKey];
         return;
       }
 
       const countdownState = applicationModel.timerCountdownDeadlineByChannel[channelKey];
       if (outputState.power === countdownState.reversePower) {
         delete applicationModel.timerCountdownDeadlineByChannel[channelKey];
+        delete applicationModel.lastRenderedCountdownSecondByChannel[channelKey];
       }
     });
   }
 
   function clearOutputCountdown(outputChannel) {
     delete applicationModel.timerCountdownDeadlineByChannel[outputChannel];
+    delete applicationModel.lastRenderedCountdownSecondByChannel[outputChannel];
   }
 
   function renderTimerDisplay(outputChannel) {
