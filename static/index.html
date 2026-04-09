@@ -707,6 +707,11 @@
     return false;
   }
 
+  function isOutputChannelPoweredOn(outputChannel) {
+    const liveOutputState = applicationModel.outputsByChannel[outputChannel];
+    return Boolean(liveOutputState && liveOutputState.power === "on");
+  }
+
   function updateApplicationScale() {
     const viewportComputedStyle = window.getComputedStyle(viewportFitElement);
     const viewportHorizontalPadding = parseFloat(viewportComputedStyle.paddingLeft) + parseFloat(viewportComputedStyle.paddingRight);
@@ -1008,7 +1013,7 @@
           }
 
           applicationModel.savedOutputTimersByChannel[outputChannel] = parsedTimerSpec.normalizedSpec;
-          if (outputState.power === "on") {
+          if (isOutputChannelPoweredOn(outputChannel)) {
             startOutputCountdownIfConfigured(outputChannel, "on");
           } else {
             clearOutputCountdown(outputChannel);
