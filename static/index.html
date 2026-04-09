@@ -899,12 +899,49 @@
   }
 
   function formatRemainingCountdown(remainingMilliseconds) {
-    if (remainingMilliseconds >= 1000) {
-      const remainingSeconds = Math.ceil(remainingMilliseconds / 1000);
-      return String(remainingSeconds) + "s";
+    const millisecondsPerSecond = 1000;
+    const millisecondsPerMinute = 60 * millisecondsPerSecond;
+    const millisecondsPerHour = 60 * millisecondsPerMinute;
+    const millisecondsPerDay = 24 * millisecondsPerHour;
+    const millisecondsPerMonth = 30 * millisecondsPerDay;
+    const millisecondsPerYear = 365 * millisecondsPerDay;
+
+    if (remainingMilliseconds >= millisecondsPerYear) {
+      return formatCountdownUnit(remainingMilliseconds / millisecondsPerYear, "y");
+    }
+    if (remainingMilliseconds >= millisecondsPerMonth) {
+      return formatCountdownUnit(remainingMilliseconds / millisecondsPerMonth, "M");
+    }
+    if (remainingMilliseconds >= millisecondsPerDay) {
+      return formatCountdownUnit(remainingMilliseconds / millisecondsPerDay, "d");
+    }
+    if (remainingMilliseconds >= millisecondsPerHour) {
+      return formatCountdownUnit(remainingMilliseconds / millisecondsPerHour, "h");
+    }
+    if (remainingMilliseconds >= millisecondsPerMinute) {
+      return formatCountdownUnit(remainingMilliseconds / millisecondsPerMinute, "m");
+    }
+    if (remainingMilliseconds >= millisecondsPerSecond) {
+      return formatCountdownUnit(remainingMilliseconds / millisecondsPerSecond, "s");
     }
 
-    return String(Math.ceil(remainingMilliseconds)) + "ms";
+    return formatCountdownUnit(remainingMilliseconds, "ms");
+  }
+
+  function formatCountdownUnit(durationAmount, durationUnit) {
+    if (durationUnit === "ms") {
+      return String(Math.ceil(durationAmount)) + durationUnit;
+    }
+
+    if (durationAmount >= 100) {
+      return String(Math.ceil(durationAmount)) + durationUnit;
+    }
+
+    if (durationAmount >= 10) {
+      return durationAmount.toFixed(2).replace(/\.?0+$/, "") + durationUnit;
+    }
+
+    return durationAmount.toFixed(4).replace(/\.?0+$/, "") + durationUnit;
   }
 
   requestStateFromServer().then(applyStateFromServer).catch(function handleInitialError(initialError) {
