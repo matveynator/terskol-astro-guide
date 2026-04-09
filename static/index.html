@@ -502,9 +502,9 @@
       const disableOutputButtonElement = document.createElement("button");
       disableOutputButtonElement.className = outputState.power === "off" ? "button-off active" : "button-off";
       disableOutputButtonElement.textContent = "OFF";
-      disableOutputButtonElement.disabled = applicationModel.pendingRequest;
-      disableOutputButtonElement.addEventListener("click", function handleDisableOutput() {
-        void sendOutputPowerToServer(outputChannel, "off", { startCountdownAfterChange: false, cancelCountdownBeforeChange: true });
+      disableOutputButtonElement.disabled = false;
+      disableOutputButtonElement.addEventListener("click", function handleEmergencyDisableOutput() {
+        void sendOutputEmergencyOffToServer(outputChannel);
       });
 
       buttonsRowElement.appendChild(enableOutputButtonElement);
@@ -687,6 +687,28 @@
     });
   }
 
+  async function sendOutputEmergencyOffToServer(outputChannel) {
+    clearOutputCountdown(outputChannel);
+    applicationModel.errorText = "";
+    renderFromModel();
+
+    try {
+      const emergencyOffResponse = await fetch("/api/output/power", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel: outputChannel, power: "off" })
+      });
+      if (!emergencyOffResponse.ok) {
+        throw new Error(await emergencyOffResponse.text());
+      }
+
+      applyStateFromServer(await emergencyOffResponse.json(), true);
+    } catch (emergencyOffError) {
+      applicationModel.errorText = String(emergencyOffError);
+      renderFromModel();
+    }
+  }
+
   async function sendOutputPWMToServer(outputChannel, nextPWM) {
     await runServerCommand(async function sendPWMCommand() {
       const pwmResponse = await fetch("/api/output/pwm", {
@@ -792,25 +814,30 @@
 
     const parsedDurationAmountText = durationMatch[1].replace(",", ".");
     const durationAmount = Number(parsedDurationAmountText);
-    if (!Number.isFinite(durationAmount)) {
+    if (!Number.isFinite(durationAmount) || durationAmount < 0) {
       return { ok: false, milliseconds: 0, normalizedSpec: "0s" };
     }
     const requestedDurationUnit = durationMatch[2] || "s";
     const canonicalDurationUnit = requestedDurationUnit === "Y" ? "y" : requestedDurationUnit;
 
-    const millisecondsByUnit = {
-      ns: 1 / 1000000,
-      ms: 1,
-      s: 1000,
-      m: 60 * 1000,
-      M: 30 * 24 * 60 * 60 * 1000,
-      h: 60 * 60 * 1000,
-      d: 24 * 60 * 60 * 1000,
-      y: 365 * 24 * 60 * 60 * 1000
+    const secondsByUnit = {
+      ns: 1 / 1000000000,
+      ms: 1 / 1000,
+      s: 1,
+      m: 60,
+      M: 30 * 24 * 60 * 60,
+      h: 60 * 60,
+      d: 24 * 60 * 60,
+      y: 365 * 24 * 60 * 60
     };
 
-    const milliseconds = durationAmount * millisecondsByUnit[canonicalDurationUnit];
-    return { ok: true, milliseconds: milliseconds, normalizedSpec: parsedDurationAmountText + canonicalDurationUnit };
+    const durationInSeconds = durationAmount * secondsByUnit[canonicalDurationUnit];
+    const durationInMilliseconds = durationInSeconds * 1000;
+    if (!Number.isFinite(durationInMilliseconds)) {
+      return { ok: false, milliseconds: 0, normalizedSpec: "0s" };
+    }
+
+    return { ok: true, milliseconds: durationInMilliseconds, normalizedSpec: parsedDurationAmountText + canonicalDurationUnit };
   }
 
   function syncTimerDefaultsWithOutputs(outputsByChannel) {
