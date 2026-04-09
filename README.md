@@ -85,10 +85,8 @@ GOOS=windows GOARCH=amd64 go build -ldflags="-H windowsgui" -o chicha-astro-cont
 ### Платформа
 Для проекта используется промышленный компьютер класса **Vecow ECX-1000** с дискретными линиями GPIO.
 
-- Страница серии ECX-1000 (описание платформы, интерфейсы, спецификация):
-  - https://www.vecow.com/dispPageBox/vecow/VecowCT01.aspx?ddsPageID=ECX1000_EN
 - Общий раздел загрузок/поддержки Vecow (драйверы, BIOS, SDK):
-  - https://www.vecow.com/dispPageBox/vecow/VecowCP.aspx?ddsPa
+  - https://www.vecow.com/dispPageBox/vecow/VecowCT.aspx?ddsPageID=PRODUCTDTL_EN&dbid=4593740175
 
 ### Примечание по сборке под Linux (WebView)
 Если при сборке появляется ошибка вида:
