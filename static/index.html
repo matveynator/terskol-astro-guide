@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Обсерватория Терскол: управление GPIO/DIO на Vecow ECX-1000</title>
+  <title id="document-title">Terskol Observatory: GPIO/DIO control on Vecow ECX-1000</title>
   <style>
     :root {
       --background: #0b1020;
@@ -361,22 +361,22 @@
 
   <section class="layout">
     <article class="panel">
-      <h2>ECX-1000 порты DIO/GPIO:</h2>
+      <h2 id="panel-ports-title">ECX-1000 DIO/GPIO ports:</h2>
       <section class="port-indicator-table">
         <div id="port-indicator-grid" class="port-indicator-grid"></div>
         <div class="port-indicator-footer">
-          <span>DI 1-8</span>
-          <span>DO 11-18</span>
-          <span>PIN20: external VDC</span>
+          <span id="ports-di-range">DI 1-8</span>
+          <span id="ports-do-range">DO 11-18</span>
+          <span id="ports-pin20">PIN20: external VDC</span>
           <span id="port-link-state" class="port-indicator-link-state">WS: connecting…</span>
         </div>
       </section>
-      <p class="panel-subtitle">Датчики (реальные пины 1..8)</p>
+      <p id="panel-ports-subtitle" class="panel-subtitle">Sensors (physical pins 1..8)</p>
       <div id="input-grid" class="channels"></div>
     </article>
 
     <article class="panel">
-      <h2>Управление оборудованием (реальные пины 11..18)</h2>
+      <h2 id="panel-outputs-title">Hardware control (physical pins 11..18)</h2>
       <div id="output-grid" class="channels"></div>
     </article>
   </section>
@@ -412,6 +412,10 @@
     lastRenderedCountdownSecondByChannel: {}
   };
   const outputMaxVoltage = 3.3;
+  const defaultLanguageCode = "en";
+  const supportedLanguageCodes = ["en", "ru", "de", "fr", "ja", "uk"];
+  let translationsByLanguage = { en: {} };
+  let activeLanguageCode = defaultLanguageCode;
 
   const viewportFitElement = document.getElementById("viewport-fit");
   const applicationRootElement = document.getElementById("application-root");
@@ -419,11 +423,82 @@
   const portIndicatorGridElement = document.getElementById("port-indicator-grid");
   const outputGridElement = document.getElementById("output-grid");
   const errorTextElement = document.getElementById("error-text");
+  const documentTitleElement = document.getElementById("document-title");
+  const panelPortsTitleElement = document.getElementById("panel-ports-title");
+  const panelPortsSubtitleElement = document.getElementById("panel-ports-subtitle");
+  const panelOutputsTitleElement = document.getElementById("panel-outputs-title");
+  const portsDIRangeElement = document.getElementById("ports-di-range");
+  const portsDORangeElement = document.getElementById("ports-do-range");
+  const portsPin20Element = document.getElementById("ports-pin20");
   const repositoryLinkElement = document.getElementById("repository-link");
   const portLinkStateElement = document.getElementById("port-link-state");
   const portHoverTooltipElement = document.getElementById("port-hover-tooltip");
   const controlChannelSocketsByChannel = {};
   let outputControlRequestSequence = 1;
+
+
+
+  function resolvePreferredLanguageCode() {
+    const browserLanguages = Array.isArray(navigator.languages) && navigator.languages.length > 0 ? navigator.languages : [navigator.language || defaultLanguageCode];
+    for (let index = 0; index < browserLanguages.length; index += 1) {
+      const browserLanguage = String(browserLanguages[index] || "").toLowerCase();
+      if (browserLanguage === "") {
+        continue;
+      }
+      const baseLanguage = browserLanguage.split("-")[0];
+      if (supportedLanguageCodes.includes(baseLanguage)) {
+        return baseLanguage;
+      }
+    }
+
+    return defaultLanguageCode;
+  }
+
+  function t(translationKey, variables) {
+    const languageTranslations = translationsByLanguage[activeLanguageCode] || {};
+    const fallbackTranslations = translationsByLanguage[defaultLanguageCode] || {};
+    let translatedText = languageTranslations[translationKey] || fallbackTranslations[translationKey] || translationKey;
+    if (!variables) {
+      return translatedText;
+    }
+
+    Object.keys(variables).forEach(function replaceVariable(variableKey) {
+      translatedText = translatedText.replaceAll("{" + variableKey + "}", String(variables[variableKey]));
+    });
+    return translatedText;
+  }
+
+  async function initializeLocalization() {
+    try {
+      const translationsResponse = await fetch("/translations.json");
+      if (translationsResponse.ok) {
+        translationsByLanguage = await translationsResponse.json();
+      }
+    } catch (translationsLoadError) {
+      translationsByLanguage = { en: {} };
+    }
+
+    activeLanguageCode = resolvePreferredLanguageCode();
+    if (!translationsByLanguage[activeLanguageCode]) {
+      activeLanguageCode = defaultLanguageCode;
+    }
+
+    applyStaticTranslations();
+  }
+
+  function applyStaticTranslations() {
+    document.documentElement.lang = t("html_lang");
+    document.title = t("document_title");
+    if (documentTitleElement) {
+      documentTitleElement.textContent = t("document_title");
+    }
+    panelPortsTitleElement.textContent = t("panel_ports_title");
+    panelPortsSubtitleElement.textContent = t("panel_ports_subtitle");
+    panelOutputsTitleElement.textContent = t("panel_outputs_title");
+    portsDIRangeElement.textContent = t("ports_di_range");
+    portsDORangeElement.textContent = t("ports_do_range");
+    portsPin20Element.textContent = t("ports_pin20");
+  }
 
   repositoryLinkElement.addEventListener("click", function handleRepositoryLinkClick(clickEvent) {
     clickEvent.preventDefault();
@@ -486,7 +561,7 @@
       portIndicatorGridElement.appendChild(portCellElement);
     });
 
-    portLinkStateElement.textContent = applicationModel.websocketConnected ? "WS: online" : "WS: reconnecting";
+    portLinkStateElement.textContent = applicationModel.websocketConnected ? t("ws_online") : t("ws_reconnecting");
   }
 
   function buildOrderedPortDescriptors() {
@@ -524,51 +599,42 @@
 
   function buildPortTooltipText(portDescriptor) {
     if (portDescriptor.type === "DI") {
-      return "Пин " + String(portDescriptor.pinNumber) + " • DI вход\n" +
-        "Назначение: дискретный вход (оптопара).\n" +
-        "DI=ON, когда на входе есть допустимый уровень напряжения относительно DI_COM.\n" +
-        "NPN (sink): DI_COM (пин 9) подключают к +V питания, вход DI активируется замыканием на V-.\n" +
-        "PNP (source): DI_COM (пин 9) подключают к V-, вход DI активируется подачей +V на пин DI.\n" +
-        "Практика коммутации: используйте экранированный провод, общий GND через пин 19 (или дублирующий пин 10).\n" +
-        "Измерения в приложении: DI отображается как цифровой сигнал ON/OFF по состоянию входа.";
+      return t("tooltip_di", { pin: portDescriptor.pinNumber });
     }
 
     if (portDescriptor.type === "DO") {
-      return "Пин " + String(portDescriptor.pinNumber) + " • DO выход\n" +
-        "Назначение: дискретный выход канала " + String(portDescriptor.pinNumber - 11) + ".\n" +
-        "Использование: управляет внешними устройствами (реле, входы ПЛК, драйверы, сигнализация).\n" +
-        "DO=ON включает линию выхода канала; DO=OFF отключает.\n" +
-        "Для стабильной коммутации: общий провод устройств ведите на GND пин 19 (дублирован на пине 10), питание DIO подайте на пин 20.\n" +
-        "PWM в приложении: это software PWM (переключение ON/OFF по времени), а не подтвержденный аппаратный PWM линии.";
+      return t("tooltip_do", { pin: portDescriptor.pinNumber, channel: portDescriptor.pinNumber - 11 });
     }
 
     if (portDescriptor.type === "COM") {
-      return "Пин 9 • DI_COM\n" +
-        "Общий контакт входов DI1..DI8.\n" +
-        "Выбор режима:\n" +
-        "- NPN (sink): DI_COM -> +V, срабатывание DI через замыкание входа на V-.\n" +
-        "- PNP (source): DI_COM -> V-, срабатывание DI через подачу +V на вход.\n" +
-        "Важно: все DI в группе используют общий DI_COM, не смешивайте NPN и PNP в одной группе без развязки.\n" +
-        "DI данные по API обычно цифровые (0/1), не полноценный АЦП-канал.";
+      return t("tooltip_com");
     }
 
     if (portDescriptor.type === "GND") {
-      return "Пин 19 • DIO_GND (дублирован на пине 10)\n" +
-        "Общий GND для DIO и внешних устройств.\n" +
-        "Использование: общий минус для DI/DO цепей, обратный провод питания, reference для безопасной коммутации.";
+      return t("tooltip_gnd");
     }
 
     if (portDescriptor.type === "VDC") {
-      return "Пин 20 • External VDC\n" +
-        "Питание DIO: внешний +6..40V (NPN) или +6..48V (PNP).\n" +
-        "Использование: линия питания для DI/DO цепей и внешних устройств, управляемых DO.\n" +
-        "Перед подачей питания проверьте полярность и соответствие режиму NPN/PNP.\n" +
-        "Не использовать как обычный DI/DO канал.";
+      return t("tooltip_vdc");
     }
 
-    return "Пин " + String(portDescriptor.pinNumber) + " • NC\n" +
-      "Служебный контакт без пользовательского DI/DO канала.\n" +
-      "Использование: оставить неподключённым, если нет отдельной схемы из мануала.";
+    return t("tooltip_nc", { pin: portDescriptor.pinNumber });
+  }
+
+  function resolveRuntimeMessage(runtimeState) {
+    if (!runtimeState) {
+      return "";
+    }
+
+    if (runtimeState.message_key) {
+      return t(runtimeState.message_key);
+    }
+
+    if (runtimeState.message) {
+      return runtimeState.message;
+    }
+
+    return "";
   }
 
   function showPortHoverTooltip(tooltipText, pointerClientX, pointerClientY) {
@@ -730,7 +796,7 @@
 
       const inputStatusLineElement = document.createElement("div");
       inputStatusLineElement.className = "input-status-line";
-      inputStatusLineElement.textContent = inputState.signal === "on" ? "signal detected" : "no signal";
+      inputStatusLineElement.textContent = inputState.signal === "on" ? t("input_signal_detected") : t("input_no_signal");
 
       inputDisplayElement.appendChild(inputCornerIndicatorElement);
       inputDisplayElement.appendChild(inputPortLineElement);
@@ -746,7 +812,7 @@
     try {
       const openRepositoryResponse = await fetch("/api/open/repository", { method: "POST" });
       if (!openRepositoryResponse.ok) {
-        throw new Error("Не удалось открыть внешний браузер");
+        throw new Error(t("error_open_browser"));
       }
       applicationModel.errorText = "";
     } catch (openRepositoryError) {
@@ -779,7 +845,7 @@
       const configuredTimerSpec = applicationModel.savedOutputTimersByChannel[outputChannel] || "0s";
       const timerDraftSpec = isEditingOutputTimer ? applicationModel.editingOutputTimersByChannel[outputChannel] : configuredTimerSpec;
       const timerValidationMessage = applicationModel.timerValidationMessageByChannel[outputChannel] || "";
-      const timerFormatHintText = "Формат: 0.5s 1ms 1m 1M 1h 1d 1y. Округление только для m/h/d/M/y.";
+      const timerFormatHintText = t("timer_format_hint");
 
       if (isEditingOutputLabel) {
         const outputNameEditorElement = document.createElement("div");
@@ -1002,7 +1068,7 @@
 
     applicationModel.inputsByChannel = nextInputsByChannel;
     applicationModel.outputsByChannel = nextOutputsByChannel;
-    applicationModel.runtimeMessage = serverState.runtime && serverState.runtime.message ? serverState.runtime.message : "";
+    applicationModel.runtimeMessage = resolveRuntimeMessage(serverState.runtime);
     syncTimerDefaultsWithOutputs(nextOutputsByChannel);
     clearEndedCountdowns(nextOutputsByChannel);
     applicationModel.errorText = "";
@@ -1013,7 +1079,7 @@
   async function requestStateFromServer() {
     const stateResponse = await fetch("/api/state");
     if (!stateResponse.ok) {
-      throw new Error("state request failed");
+      throw new Error(t("error_state_request_failed"));
     }
 
     return stateResponse.json();
@@ -1054,7 +1120,7 @@
           applicationModel.outputLastAppliedAtByChannel[outputChannel] = Date.now();
           scheduleOutputCommandIndicatorRefresh(outputChannel);
         } else if (!controlResponse.ok) {
-          applicationModel.errorText = controlResponse.error || "control command failed";
+          applicationModel.errorText = controlResponse.error || t("error_control_command_failed");
         }
       } catch (controlMessageParseError) {
         applicationModel.errorText = String(controlMessageParseError);
@@ -1219,15 +1285,15 @@
   function buildOutputCommandIndicatorText(outputChannel) {
     const hasInFlightCommand = Boolean(applicationModel.outputControlInFlightByChannel[outputChannel]);
     if (hasInFlightCommand) {
-      return "sending…";
+      return t("command_sending");
     }
 
     const lastAppliedTimestampMs = applicationModel.outputLastAppliedAtByChannel[outputChannel] || 0;
     if (Date.now() - lastAppliedTimestampMs < 1200) {
-      return "applied";
+      return t("command_applied");
     }
 
-    return "ready";
+    return t("command_ready");
   }
 
   function scheduleOutputCommandIndicatorRefresh(outputChannel) {
@@ -1491,13 +1557,15 @@
     return String(wholeRemainingSeconds) + "s";
   }
 
-  requestStateFromServer().then(applyStateFromServer).catch(function handleInitialError(initialError) {
-    applicationModel.errorText = String(initialError);
+  initializeLocalization().then(function startApplication() {
+    requestStateFromServer().then(applyStateFromServer).catch(function handleInitialError(initialError) {
+      applicationModel.errorText = String(initialError);
+      renderFromModel();
+    });
+
+    startStateWebSocketLoop();
     renderFromModel();
   });
-
-  startStateWebSocketLoop();
-  renderFromModel();
 </script>
 </body>
 </html>

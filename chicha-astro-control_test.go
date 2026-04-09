@@ -227,8 +227,8 @@ func TestDetectIORuntimeModeEnablesSimulationWhenPathsMissing(t *testing.T) {
 	if !mode.state.TestMode {
 		t.Fatalf("expected runtime state to mark test mode")
 	}
-	if mode.state.Message == "" {
-		t.Fatalf("expected runtime state message to explain missing GPIO paths")
+	if mode.state.MessageKey == "" {
+		t.Fatalf("expected runtime state message key to explain missing GPIO paths")
 	}
 }
 
