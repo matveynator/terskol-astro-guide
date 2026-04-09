@@ -631,8 +631,9 @@
     });
   }
 
-  function applyStateFromServer(serverState) {
-    if (hasActiveEditing()) {
+  function applyStateFromServer(serverState, forceApplyDuringEditing) {
+    const mustForceApply = Boolean(forceApplyDuringEditing);
+    if (!mustForceApply && hasActiveEditing()) {
       return;
     }
 
@@ -679,7 +680,7 @@
         throw new Error(await powerResponse.text());
       }
 
-      applyStateFromServer(await powerResponse.json());
+      applyStateFromServer(await powerResponse.json(), true);
       if (commandOptions.startCountdownAfterChange) {
         startOutputCountdownIfConfigured(outputChannel, nextPower);
       }
@@ -697,7 +698,7 @@
         throw new Error(await pwmResponse.text());
       }
 
-      applyStateFromServer(await pwmResponse.json());
+      applyStateFromServer(await pwmResponse.json(), true);
     });
   }
 
@@ -713,7 +714,7 @@
       }
 
       delete applicationModel.editingInputLabelsByChannel[inputChannel];
-      applyStateFromServer(await labelResponse.json());
+      applyStateFromServer(await labelResponse.json(), true);
     });
   }
 
@@ -729,7 +730,7 @@
       }
 
       delete applicationModel.editingOutputLabelsByChannel[channel];
-      applyStateFromServer(await labelResponse.json());
+      applyStateFromServer(await labelResponse.json(), true);
     });
   }
 
