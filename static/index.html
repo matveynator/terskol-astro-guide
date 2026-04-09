@@ -1008,6 +1008,11 @@
           }
 
           applicationModel.savedOutputTimersByChannel[outputChannel] = parsedTimerSpec.normalizedSpec;
+          if (outputState.power === "on") {
+            startOutputCountdownIfConfigured(outputChannel, "on");
+          } else {
+            clearOutputCountdown(outputChannel);
+          }
           delete applicationModel.editingOutputTimersByChannel[outputChannel];
           delete applicationModel.timerValidationMessageByChannel[outputChannel];
           applicationModel.errorText = "";
