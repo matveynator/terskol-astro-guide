@@ -776,9 +776,10 @@ func resolveSettingsFilePath(explicitSettingsFile string) (string, error) {
 		settingsDirectory = homeDirectory
 	}
 
-	settingsFile := filepath.Join(settingsDirectory, "."+strings.ToUpper(applicationName)+".conf")
+	normalizedApplicationName := strings.ToLower(applicationName)
+	settingsFile := filepath.Join(settingsDirectory, "."+normalizedApplicationName+".conf")
 	if runtime.GOOS == "windows" {
-		settingsFile = filepath.Join(settingsDirectory, strings.ToUpper(applicationName)+".conf")
+		settingsFile = filepath.Join(settingsDirectory, normalizedApplicationName+".conf")
 	}
 	return settingsFile, ensureSettingsFile(settingsFile)
 }

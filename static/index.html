@@ -340,13 +340,6 @@
       padding: 0 8px;
       font-size: 13px;
     }
-    @media (max-width: 1080px) {
-      .layout { grid-template-columns: 1fr; }
-      .channels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    }
-    @media (max-width: 740px) {
-      .channels { grid-template-columns: 1fr; }
-    }
     .repository-footer {
       margin-top: auto;
       text-align: center;
@@ -662,8 +655,7 @@
 
     const proportionalScale = Math.min(
       availableViewportWidth / requiredLayoutWidth,
-      availableViewportHeight / requiredLayoutHeight,
-      1
+      availableViewportHeight / requiredLayoutHeight
     );
 
     applicationRootElement.style.transform = "scale(" + proportionalScale + ")";
