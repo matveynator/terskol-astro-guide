@@ -413,6 +413,7 @@
     websocketConnected: false,
     outputControlInFlightByChannel: {},
     outputLastAppliedAtByChannel: {},
+    outputIndicatorRefreshTimerByChannel: {},
     lastStateSignature: "",
     lastRenderedCountdownSecondByChannel: {}
   };
@@ -1051,6 +1052,7 @@
         if (controlResponse.ok && controlResponse.state) {
           applyStateFromServer(controlResponse.state, true);
           applicationModel.outputLastAppliedAtByChannel[outputChannel] = Date.now();
+          scheduleOutputCommandIndicatorRefresh(outputChannel);
         } else if (!controlResponse.ok) {
           applicationModel.errorText = controlResponse.error || "control command failed";
         }
@@ -1226,6 +1228,18 @@
     }
 
     return "ready";
+  }
+
+  function scheduleOutputCommandIndicatorRefresh(outputChannel) {
+    const existingTimerIdentifier = applicationModel.outputIndicatorRefreshTimerByChannel[outputChannel];
+    if (existingTimerIdentifier) {
+      window.clearTimeout(existingTimerIdentifier);
+    }
+
+    applicationModel.outputIndicatorRefreshTimerByChannel[outputChannel] = window.setTimeout(function handleIndicatorRefresh() {
+      delete applicationModel.outputIndicatorRefreshTimerByChannel[outputChannel];
+      renderFromModel();
+    }, 1300);
   }
 
   function formatOutputVoltage(outputPWMPercent) {
