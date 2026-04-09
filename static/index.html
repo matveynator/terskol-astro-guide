@@ -117,15 +117,17 @@
       opacity: 1;
     }
     .port-hover-tooltip-title {
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 800;
       color: #86efac;
       margin-bottom: 6px;
       letter-spacing: 0.2px;
     }
     .port-hover-tooltip-line {
-      margin: 3px 0;
+      margin: 4px 0;
       color: #d7e2fa;
+      font-size: 12px;
+      font-weight: 500;
     }
     .port-hover-tooltip-line.bullet::before {
       content: "• ";
@@ -221,8 +223,8 @@
       margin-left: 14px;
     }
     .input-label-title {
-      font-size: 14px;
-      font-weight: 700;
+      font-size: 12px;
+      font-weight: 800;
       letter-spacing: 0.2px;
       text-transform: uppercase;
       max-width: 82%;
@@ -258,7 +260,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 24px;
+      font-size: 30px;
       font-weight: 800;
       letter-spacing: 0.5px;
       font-family: "Segoe UI", "Roboto Mono", monospace;
@@ -270,10 +272,10 @@
     .input-status-line {
       display: flex;
       justify-content: center;
-      font-size: 11px;
+      font-size: 12px;
       color: var(--muted);
       text-transform: uppercase;
-      letter-spacing: 0.7px;
+      letter-spacing: 0.8px;
     }
     .output-display {
       position: relative;
@@ -655,6 +657,26 @@
       const inputCornerIndicatorElement = document.createElement("span");
       inputCornerIndicatorElement.className = inputState.signal === "on" ? "input-corner-indicator on" : "input-corner-indicator";
 
+      const inputHeaderRowElement = document.createElement("div");
+      inputHeaderRowElement.className = "input-header-row";
+
+      const inputLabelTitleElement = document.createElement("div");
+      inputLabelTitleElement.className = "input-label-title";
+      inputLabelTitleElement.textContent = "PORT DI" + String(inputChannel);
+
+      const editInputNameButtonElement = document.createElement("button");
+      editInputNameButtonElement.className = "input-icon-button";
+      editInputNameButtonElement.textContent = "✎";
+      editInputNameButtonElement.disabled = applicationModel.pendingRequest;
+      editInputNameButtonElement.addEventListener("click", function handleInputLabelEditStart() {
+        applicationModel.editingInputLabelsByChannel[inputChannel] = inputState.label;
+        renderFromModel();
+      });
+
+      inputHeaderRowElement.appendChild(inputLabelTitleElement);
+      inputHeaderRowElement.appendChild(editInputNameButtonElement);
+      inputDisplayElement.appendChild(inputHeaderRowElement);
+
       if (isEditingInputLabel) {
         const inputNameEditorElement = document.createElement("div");
         inputNameEditorElement.className = "input-name-editor";
@@ -677,32 +699,11 @@
         inputNameEditorElement.appendChild(inputNameFieldElement);
         inputNameEditorElement.appendChild(saveInputNameButtonElement);
         inputDisplayElement.appendChild(inputNameEditorElement);
-      } else {
-        const inputHeaderRowElement = document.createElement("div");
-        inputHeaderRowElement.className = "input-header-row";
-
-        const inputLabelTitleElement = document.createElement("div");
-        inputLabelTitleElement.className = "input-label-title";
-        inputLabelTitleElement.textContent = inputState.label;
-
-        const editInputNameButtonElement = document.createElement("button");
-        editInputNameButtonElement.className = "input-icon-button";
-        editInputNameButtonElement.textContent = "✎";
-        editInputNameButtonElement.disabled = applicationModel.pendingRequest;
-        editInputNameButtonElement.addEventListener("click", function handleInputLabelEditStart() {
-          applicationModel.editingInputLabelsByChannel[inputChannel] = inputState.label;
-          renderFromModel();
-        });
-
-        inputHeaderRowElement.appendChild(inputLabelTitleElement);
-        inputHeaderRowElement.appendChild(editInputNameButtonElement);
-        inputDisplayElement.appendChild(inputHeaderRowElement);
-
       }
 
       const inputPortLineElement = document.createElement("div");
       inputPortLineElement.className = inputState.signal === "on" ? "input-port-line on" : "input-port-line";
-      inputPortLineElement.textContent = inputState.label || ("DI " + String(inputChannel));
+      inputPortLineElement.textContent = inputState.label || ("DI" + String(inputChannel));
 
       const inputStatusLineElement = document.createElement("div");
       inputStatusLineElement.className = "input-status-line";
