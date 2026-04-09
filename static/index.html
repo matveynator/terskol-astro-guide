@@ -603,7 +603,7 @@
     }
 
     if (portDescriptor.type === "DO") {
-      return t("tooltip_do", { pin: portDescriptor.pinNumber, channel: portDescriptor.pinNumber - 11 });
+      return t("tooltip_do", { pin: portDescriptor.pinNumber, channel: portDescriptor.pinNumber });
     }
 
     if (portDescriptor.type === "COM") {
