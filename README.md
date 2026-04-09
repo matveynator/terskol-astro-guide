@@ -51,10 +51,23 @@ GOOS=windows GOARCH=amd64 go build -ldflags="-H windowsgui" -o chicha-astro-cont
 - `-DO` — шаблон пути к DO (`%d` обязателен)
 - `-config` — путь к JSON-файлу настроек
 
+> На Windows для ECX-1000-2G штатный путь — через `ECX1K.dll` API.
+> Флаги `-DI/-DO` используются как fallback только для Unix-like backend.
+
 ## Значения по умолчанию
 - Linux: `/sys/class/gpio/gpio%d/value`
-- Windows: `C:\Vecow\ECX1K\di%d.value` и `C:\Vecow\ECX1K\do%d.value`
+- Windows: `ECX1K.dll` (`Initial`, `SetGPIOConfig`, `GetGPIO`, `SetGPIO`)
 - macOS: `/tmp/astro-control/di%d.value` и `/tmp/astro-control/do%d.value`
+
+## GPIO backends
+- Windows (`GOOS=windows`):
+  - загрузка `ECX1K.dll`;
+  - инициализация `Initial(0, 0)` для non-isolated GPIO;
+  - настройка направлений `SetGPIOConfig(0xFF00)` (DI: bits `0..7`, DO: bits `8..15`);
+  - чтение входов через `GetGPIO`, управление выходами через `SetGPIO`.
+- Linux/macOS:
+  - backend через файловые пути (`/sys/class/gpio` для Linux, `/tmp/astro-control` для macOS);
+  - если пути недоступны — runtime автоматически переходит в simulation mode.
 
 ## Быстрая памятка по пинам
 - `DI1..DI8` → пины `1..8`

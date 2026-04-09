@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"chicha-astro-control/pkg/gpio"
 	webview "github.com/jchv/go-webview-selector"
 )
 
@@ -99,16 +100,16 @@ type runtimeState struct {
 	MessageKey string `json:"message_key"`
 }
 
-type ioRuntimeMode struct {
-	inputSimulation  bool
-	outputSimulation bool
-	state            runtimeState
-}
-
 type savedOutputState struct {
 	Channel int    `json:"channel"`
 	Power   string `json:"power"`
 	PWM     int    `json:"pwm"`
+}
+
+type ioRuntimeMode struct {
+	inputSimulation  bool
+	outputSimulation bool
+	state            runtimeState
 }
 
 type persistedSettings struct {
@@ -148,23 +149,41 @@ func main() {
 	flag.Parse()
 
 	resolvedIOPaths := ioPaths{
-		inputTemplate:  resolveIOPathTemplate(*inputPathTemplateFlag, defaultDIPathTemplate()),
-		outputTemplate: resolveIOPathTemplate(*outputPathTemplateFlag, defaultDOPathTemplate()),
+		inputTemplate:  resolveIOPathTemplate(*inputPathTemplateFlag, gpio.DefaultInputTemplate()),
+		outputTemplate: resolveIOPathTemplate(*outputPathTemplateFlag, gpio.DefaultOutputTemplate()),
 	}
-	runtimeMode := detectIORuntimeMode(resolvedIOPaths)
+	gpioAdapter, runtimeMode, err := gpio.Open(gpio.Config{
+		InputTemplate:  resolvedIOPaths.inputTemplate,
+		OutputTemplate: resolvedIOPaths.outputTemplate,
+	})
+	if err != nil {
+		log.Fatalf("startup: GPIO init failed: %v", err)
+	}
+	defer func() {
+		if closeErr := gpioAdapter.Close(); closeErr != nil {
+			log.Printf("shutdown: GPIO close failed: %v", closeErr)
+		}
+	}()
+	logRuntimeMode(runtimeMode, resolvedIOPaths)
 
 	stateCommands := make(chan stateCommand)
-	outputPWMController := startPWMController(resolvedIOPaths.outputTemplate, defaultPWMFrequency, runtimeMode.outputSimulation)
+	runtimeStateData := runtimeState{}
+	if runtimeMode.InputSimulation || runtimeMode.OutputSimulation {
+		runtimeStateData = runtimeState{TestMode: true, MessageKey: "runtime_demo_mode"}
+	}
+
+	outputPWMController := startPWMController(gpioAdapter, defaultPWMFrequency, runtimeMode.OutputSimulation)
 	settingsFile, err := resolveSettingsFilePath(*settingsFileFlag)
 	if err != nil {
 		log.Fatalf("startup: settings path resolve failed: %v", err)
 	}
 	go runStateOwner(
 		stateCommands,
-		resolvedIOPaths,
+		gpioAdapter,
 		settingsFile,
 		outputPWMController,
 		runtimeMode,
+		runtimeStateData,
 	)
 
 	http.HandleFunc("/api/state", handleGetState(stateCommands))
@@ -213,28 +232,6 @@ func resolveIOPathTemplate(explicitTemplate string, fallbackTemplate string) str
 	return trimmedExplicitTemplate
 }
 
-func defaultDIPathTemplate() string {
-	switch runtime.GOOS {
-	case "windows":
-		return `C:\Vecow\ECX1K\di%d.value`
-	case "darwin":
-		return "/tmp/astro-control/di%d.value"
-	default:
-		return "/sys/class/gpio/gpio%d/value"
-	}
-}
-
-func defaultDOPathTemplate() string {
-	switch runtime.GOOS {
-	case "windows":
-		return `C:\Vecow\ECX1K\do%d.value`
-	case "darwin":
-		return "/tmp/astro-control/do%d.value"
-	default:
-		return "/sys/class/gpio/gpio%d/value"
-	}
-}
-
 func listenOnFirstAvailablePort(startPort int) (net.Listener, string) {
 	for portNumber := startPort; portNumber <= 65535; portNumber++ {
 		address := fmt.Sprintf("127.0.0.1:%d", portNumber)
@@ -248,35 +245,26 @@ func listenOnFirstAvailablePort(startPort int) (net.Listener, string) {
 	return nil, ""
 }
 
+func logRuntimeMode(mode gpio.RuntimeMode, resolvedIOPaths ioPaths) {
+	if mode.InputSimulation {
+		log.Printf("gpio: inputs are unavailable, switch to simulation mode. template=%s", resolvedIOPaths.inputTemplate)
+	}
+	if mode.OutputSimulation {
+		log.Printf("gpio: outputs are unavailable, switch to simulation mode. template=%s", resolvedIOPaths.outputTemplate)
+	}
+}
+
 func detectIORuntimeMode(resolvedIOPaths ioPaths) ioRuntimeMode {
 	mode := ioRuntimeMode{}
-
-	missingInputPath := firstMissingChannelPath(resolvedIOPaths.inputTemplate, inputCount)
-	if missingInputPath != "" {
+	if firstMissingChannelPath(resolvedIOPaths.inputTemplate, inputCount) != "" {
 		mode.inputSimulation = true
-		log.Printf("gpio: inputs are unavailable, switch to simulation mode. Missing path=%s. Install GPIO drivers or set -DI template.", missingInputPath)
 	}
-
-	missingOutputPath := firstMissingChannelPath(resolvedIOPaths.outputTemplate, outputCount)
-	if missingOutputPath != "" {
+	if firstMissingChannelPath(resolvedIOPaths.outputTemplate, outputCount) != "" {
 		mode.outputSimulation = true
-		log.Printf("gpio: outputs are unavailable, switch to simulation mode. Missing path=%s. Install GPIO drivers or set -DO template.", missingOutputPath)
 	}
-
 	if mode.inputSimulation || mode.outputSimulation {
-		mode.state = runtimeState{
-			TestMode:   true,
-			Message:    "",
-			MessageKey: "runtime_demo_mode",
-		}
-	} else {
-		mode.state = runtimeState{
-			TestMode:   false,
-			Message:    "",
-			MessageKey: "",
-		}
+		mode.state = runtimeState{TestMode: true, MessageKey: "runtime_demo_mode"}
 	}
-
 	return mode
 }
 
@@ -372,22 +360,22 @@ func openURLInExternalBrowser(repositoryURL string) error {
 // State owner goroutine.
 // =============================
 
-func runStateOwner(stateCommands <-chan stateCommand, resolvedIOPaths ioPaths, settingsFile string, outputPWMController *pwmController, runtimeMode ioRuntimeMode) {
+func runStateOwner(stateCommands <-chan stateCommand, gpioAdapter gpio.Adapter, settingsFile string, outputPWMController *pwmController, runtimeMode gpio.RuntimeMode, runtimeStateData runtimeState) {
 	loadedSettings := loadSettings(settingsFile)
 	state := buildInitialState(loadedSettings.Labels, indexOutputsByChannel(loadedSettings.Outputs))
-	state.Runtime = runtimeMode.state
+	state.Runtime = runtimeStateData
 	for _, configuredOutput := range state.Outputs {
 		outputPWMController.Apply(configuredOutput)
 	}
-	if !runtimeMode.inputSimulation {
-		refreshInputSignals(&state, resolvedIOPaths.inputTemplate)
+	if !runtimeMode.InputSimulation {
+		refreshInputSignals(&state, gpioAdapter)
 	}
 
 	for command := range stateCommands {
 		switch command.kind {
 		case "get":
-			if !runtimeMode.inputSimulation {
-				refreshInputSignals(&state, resolvedIOPaths.inputTemplate)
+			if !runtimeMode.InputSimulation {
+				refreshInputSignals(&state, gpioAdapter)
 			}
 			command.reply <- stateReply{state: cloneState(state)}
 
@@ -602,14 +590,17 @@ func cloneState(source appState) appState {
 	return appState{Inputs: copiedInputs, Outputs: copiedOutputs, Runtime: source.Runtime}
 }
 
-func refreshInputSignals(state *appState, inputPathTemplate string) {
+func refreshInputSignals(state *appState, gpioAdapter gpio.Adapter) {
 	for index := range state.Inputs {
-		rawInputSignal, err := readInputSignal(index+1, inputPathTemplate)
+		isOn, err := gpioAdapter.ReadInput(index + 1)
 		if err != nil {
 			continue
 		}
-
-		state.Inputs[index].Signal = parseInputSignal(rawInputSignal)
+		if isOn {
+			state.Inputs[index].Signal = "on"
+			continue
+		}
+		state.Inputs[index].Signal = "off"
 	}
 }
 
@@ -623,7 +614,7 @@ func parseInputSignal(rawInputSignal string) string {
 	}
 }
 
-func startPWMController(outputPathTemplate string, pwmFrequencyHz float64, simulationMode bool) *pwmController {
+func startPWMController(gpioAdapter gpio.Adapter, pwmFrequencyHz float64, simulationMode bool) *pwmController {
 	if pwmFrequencyHz <= 0 {
 		pwmFrequencyHz = 100
 	}
@@ -635,7 +626,7 @@ func startPWMController(outputPathTemplate string, pwmFrequencyHz float64, simul
 	for channel := 1; channel <= outputCount; channel++ {
 		channelCommandQueue := make(chan pwmChannelCommand, 1)
 		controller.channelCommands[channel-1] = channelCommandQueue
-		go runPWMChannelLoop(channel, fmt.Sprintf(outputPathTemplate, channel), pwmFrequencyHz, channelCommandQueue, simulationMode)
+		go runPWMChannelLoop(channel, gpioAdapter, pwmFrequencyHz, channelCommandQueue, simulationMode)
 	}
 
 	return controller
@@ -663,10 +654,10 @@ func (controller *pwmController) Apply(output outputState) {
 	}
 }
 
-func runPWMChannelLoop(channel int, outputPath string, pwmFrequencyHz float64, channelCommands <-chan pwmChannelCommand, simulationMode bool) {
+func runPWMChannelLoop(channel int, gpioAdapter gpio.Adapter, pwmFrequencyHz float64, channelCommands <-chan pwmChannelCommand, simulationMode bool) {
 	currentCommand := pwmChannelCommand{power: "off", pwm: 0}
 	pwmPeriod := time.Duration(float64(time.Second) / pwmFrequencyHz)
-	log.Printf("pwm: channel=%d path=%s frequency=%.2fHz", channel, outputPath, pwmFrequencyHz)
+	log.Printf("pwm: channel=%d frequency=%.2fHz", channel, pwmFrequencyHz)
 	if simulationMode {
 		log.Printf("pwm: channel=%d test mode enabled, GPIO writes are disabled", channel)
 		for {
@@ -677,7 +668,7 @@ func runPWMChannelLoop(channel int, outputPath string, pwmFrequencyHz float64, c
 
 	for {
 		if currentCommand.power != "on" || currentCommand.pwm <= 0 {
-			if err := writeOutputRaw(outputPath, "0"); err != nil {
+			if err := gpioAdapter.WriteOutput(channel, false); err != nil {
 				log.Printf("pwm: channel=%d write low failed: %v", channel, err)
 			}
 			currentCommand = <-channelCommands
@@ -685,7 +676,7 @@ func runPWMChannelLoop(channel int, outputPath string, pwmFrequencyHz float64, c
 		}
 
 		if currentCommand.pwm >= 100 {
-			if err := writeOutputRaw(outputPath, "1"); err != nil {
+			if err := gpioAdapter.WriteOutput(channel, true); err != nil {
 				log.Printf("pwm: channel=%d write high failed: %v", channel, err)
 			}
 			currentCommand = <-channelCommands
@@ -695,7 +686,7 @@ func runPWMChannelLoop(channel int, outputPath string, pwmFrequencyHz float64, c
 		onDuration := time.Duration(float64(pwmPeriod) * (float64(currentCommand.pwm) / 100.0))
 		offDuration := pwmPeriod - onDuration
 
-		if err := writeOutputRaw(outputPath, "1"); err != nil {
+		if err := gpioAdapter.WriteOutput(channel, true); err != nil {
 			log.Printf("pwm: channel=%d write high failed: %v", channel, err)
 		}
 		if hasNewCommand, nextCommand := waitPWMStage(channelCommands, onDuration); hasNewCommand {
@@ -703,7 +694,7 @@ func runPWMChannelLoop(channel int, outputPath string, pwmFrequencyHz float64, c
 			continue
 		}
 
-		if err := writeOutputRaw(outputPath, "0"); err != nil {
+		if err := gpioAdapter.WriteOutput(channel, false); err != nil {
 			log.Printf("pwm: channel=%d write low failed: %v", channel, err)
 		}
 		if hasNewCommand, nextCommand := waitPWMStage(channelCommands, offDuration); hasNewCommand {
