@@ -1,7 +1,10 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -174,5 +177,55 @@ func TestResolveSettingsFilePathCreatesExplicitSettingsFile(t *testing.T) {
 	}
 	if len(loadedSettings.Outputs) != 0 {
 		t.Fatalf("expected empty outputs list, got %v", loadedSettings.Outputs)
+	}
+}
+
+func TestResolveSettingsFilePathUsesOSSpecificDefaultLocation(t *testing.T) {
+	resolvedSettingsFile, resolveError := resolveSettingsFilePath("")
+	if resolveError != nil {
+		t.Fatalf("expected no resolve error, got %v", resolveError)
+	}
+
+	if runtime.GOOS == "windows" {
+		if !strings.HasPrefix(strings.ToLower(resolvedSettingsFile), "c:\\") && !strings.HasPrefix(strings.ToLower(resolvedSettingsFile), "c:/") {
+			t.Fatalf("expected Windows settings file on C drive, got %q", resolvedSettingsFile)
+		}
+		return
+	}
+
+	homeDirectory, homeError := os.UserHomeDir()
+	if homeError != nil {
+		t.Fatalf("expected readable home directory, got %v", homeError)
+	}
+	if !strings.HasPrefix(resolvedSettingsFile, homeDirectory) {
+		t.Fatalf("expected settings file in home directory %q, got %q", homeDirectory, resolvedSettingsFile)
+	}
+	if !strings.HasPrefix(filepath.Base(resolvedSettingsFile), ".") {
+		t.Fatalf("expected hidden dotfile for unix-like OS, got %q", resolvedSettingsFile)
+	}
+	if !strings.HasSuffix(resolvedSettingsFile, ".conf") {
+		t.Fatalf("expected .conf settings file extension, got %q", resolvedSettingsFile)
+	}
+}
+
+func TestDetectIORuntimeModeEnablesSimulationWhenPathsMissing(t *testing.T) {
+	temporaryDirectory := t.TempDir()
+	resolvedPaths := ioPaths{
+		inputTemplate:  filepath.Join(temporaryDirectory, "missing-di-%d.value"),
+		outputTemplate: filepath.Join(temporaryDirectory, "missing-do-%d.value"),
+	}
+
+	mode := detectIORuntimeMode(resolvedPaths)
+	if !mode.inputSimulation {
+		t.Fatalf("expected input simulation mode to be enabled")
+	}
+	if !mode.outputSimulation {
+		t.Fatalf("expected output simulation mode to be enabled")
+	}
+	if !mode.state.TestMode {
+		t.Fatalf("expected runtime state to mark test mode")
+	}
+	if mode.state.Message == "" {
+		t.Fatalf("expected runtime state message to explain missing GPIO paths")
 	}
 }
