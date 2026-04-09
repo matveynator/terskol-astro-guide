@@ -52,8 +52,12 @@
       border-radius: 8px;
       border: 1px solid #32415f;
       background: rgba(11, 18, 34, var(--ui-alpha));
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2395a2bf' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M12 7.8v4.6l3 1.8'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: 8px center;
+      background-size: 13px 13px;
       color: var(--text);
-      padding: 0 8px;
+      padding: 0 8px 0 28px;
       display: flex;
       align-items: center;
       justify-content: flex-start;
@@ -68,8 +72,12 @@
       border-radius: 8px;
       border: 1px solid #32415f;
       background: rgba(11, 18, 34, var(--ui-alpha));
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2395a2bf' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M12 7.8v4.6l3 1.8'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: 8px center;
+      background-size: 13px 13px;
       color: var(--text);
-      padding: 0 8px;
+      padding: 0 8px 0 28px;
       font-size: 13px;
       font-family: "Segoe UI", "Roboto Mono", monospace;
     }
@@ -556,7 +564,7 @@
         saveTimerButtonElement.addEventListener("click", function handleTimerSave() {
           const parsedTimerSpec = parseDurationSpec(timerInputElement.value);
           if (!parsedTimerSpec.ok) {
-            applicationModel.errorText = "Неверный формат таймера. Используйте 1ns 1ms 1s 1m 1M 1h 1d 1y";
+            applicationModel.errorText = "Неверный формат таймера. Используйте 1ns 1ms 1s 1m 1M 1h 1d 1y 1Y";
             renderFromModel();
             return;
           }
@@ -749,13 +757,14 @@
       return { ok: true, milliseconds: 0, normalizedSpec: "0s" };
     }
 
-    const durationMatch = normalizedRawValue.match(/^(\d+)(ns|ms|s|m|M|h|d|y)?$/);
+    const durationMatch = normalizedRawValue.match(/^(\d+)(ns|ms|s|m|M|h|d|y|Y)?$/);
     if (!durationMatch) {
       return { ok: false, milliseconds: 0, normalizedSpec: "0s" };
     }
 
     const durationAmount = Number(durationMatch[1]);
-    const durationUnit = durationMatch[2] || "s";
+    const requestedDurationUnit = durationMatch[2] || "s";
+    const canonicalDurationUnit = requestedDurationUnit === "Y" ? "y" : requestedDurationUnit;
 
     const millisecondsByUnit = {
       ns: 1 / 1000000,
@@ -768,8 +777,8 @@
       y: 365 * 24 * 60 * 60 * 1000
     };
 
-    const milliseconds = durationAmount * millisecondsByUnit[durationUnit];
-    return { ok: true, milliseconds: milliseconds, normalizedSpec: String(durationAmount) + durationUnit };
+    const milliseconds = durationAmount * millisecondsByUnit[canonicalDurationUnit];
+    return { ok: true, milliseconds: milliseconds, normalizedSpec: String(durationAmount) + canonicalDurationUnit };
   }
 
   function syncTimerDefaultsWithOutputs(outputsByChannel) {
@@ -822,7 +831,9 @@
         void sendOutputPowerToServer(toggleInfo.channel, toggleInfo.reversePower, { startCountdownAfterChange: false, cancelCountdownBeforeChange: false });
       });
 
-      renderFromModel();
+      if (!hasActiveEditing()) {
+        renderFromModel();
+      }
     }, 200);
   }
 
