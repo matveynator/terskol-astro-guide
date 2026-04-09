@@ -116,6 +116,21 @@
     .port-hover-tooltip.visible {
       opacity: 1;
     }
+    .port-hover-tooltip-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: #86efac;
+      margin-bottom: 6px;
+      letter-spacing: 0.2px;
+    }
+    .port-hover-tooltip-line {
+      margin: 3px 0;
+      color: #d7e2fa;
+    }
+    .port-hover-tooltip-line.bullet::before {
+      content: "• ";
+      color: #93c5fd;
+    }
     .channel-card { border: 1px solid var(--card-border); border-radius: 10px; padding: 5px; display: flex; flex-direction: column; gap: 4px; background: rgba(9, 14, 28, var(--ui-alpha)); }
     .io-buttons { display: flex; gap: 6px; }
     button { border: 1px solid transparent; border-radius: 8px; height: clamp(24px, 2vw, 32px); font-size: clamp(11px, 0.9vw, 13px); color: white; cursor: pointer; background: rgba(51, 65, 85, var(--ui-alpha)); }
@@ -532,7 +547,7 @@
   }
 
   function showPortHoverTooltip(tooltipText, pointerClientX, pointerClientY) {
-    portHoverTooltipElement.textContent = tooltipText;
+    portHoverTooltipElement.innerHTML = buildPortTooltipMarkup(tooltipText);
     portHoverTooltipElement.classList.add("visible");
 
     const viewportWidth = window.innerWidth;
@@ -555,6 +570,35 @@
 
   function hidePortHoverTooltip() {
     portHoverTooltipElement.classList.remove("visible");
+  }
+
+  function buildPortTooltipMarkup(tooltipText) {
+    const tooltipLines = String(tooltipText).split("\n").filter(function keepNonEmptyLine(singleLine) {
+      return singleLine.trim() !== "";
+    });
+    if (tooltipLines.length === 0) {
+      return "";
+    }
+
+    const titleMarkup = "<div class=\"port-hover-tooltip-title\">" + escapeHTMLText(tooltipLines[0]) + "</div>";
+    const bodyLines = tooltipLines.slice(1).map(function convertBodyLine(singleLine) {
+      const trimmedLine = singleLine.trim();
+      const isBulletLine = trimmedLine.startsWith("-");
+      const lineContent = isBulletLine ? trimmedLine.slice(1).trim() : trimmedLine;
+      const lineClassName = isBulletLine ? "port-hover-tooltip-line bullet" : "port-hover-tooltip-line";
+      return "<div class=\"" + lineClassName + "\">" + escapeHTMLText(lineContent) + "</div>";
+    });
+
+    return titleMarkup + bodyLines.join("");
+  }
+
+  function escapeHTMLText(rawText) {
+    return String(rawText)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll("\"", "&quot;")
+      .replaceAll("'", "&#39;");
   }
 
   function isPortActive(portDescriptor) {
