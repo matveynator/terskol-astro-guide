@@ -1,16 +1,21 @@
 package main
 
 import (
+	"crypto/sha1"
 	"embed"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -41,9 +46,6 @@ const (
 	outputCount          = 8
 	serverStartupTimeout = 45 * time.Second
 	defaultStartPort     = 7654
-	defaultInputOnV      = 24.0
-	defaultInputOffV     = 0.0
-	defaultInputThreshV  = 2.0
 	defaultPWMFrequency  = 100.0
 )
 
@@ -54,8 +56,6 @@ const (
 type inputState struct {
 	Channel int    `json:"channel"`
 	Signal  string `json:"signal"`
-	Voltage string `json:"voltage"`
-	Hz      string `json:"hz"`
 	Label   string `json:"label"`
 }
 
@@ -92,12 +92,6 @@ type ioPaths struct {
 	outputTemplate string
 }
 
-type runtimeConfig struct {
-	inputOnVoltage        float64
-	inputOffVoltage       float64
-	inputThresholdVoltage float64
-}
-
 type savedOutputState struct {
 	Channel int    `json:"channel"`
 	Power   string `json:"power"`
@@ -107,12 +101,6 @@ type savedOutputState struct {
 type persistedSettings struct {
 	Labels  map[string]string  `json:"labels"`
 	Outputs []savedOutputState `json:"outputs"`
-}
-
-type inputMetric struct {
-	lastSignal string
-	lastEdgeAt time.Time
-	lastHz     float64
 }
 
 type stateCommand struct {
@@ -160,16 +148,13 @@ func main() {
 	go runStateOwner(
 		stateCommands,
 		resolvedIOPaths,
-		runtimeConfig{
-			inputOnVoltage:        defaultInputOnV,
-			inputOffVoltage:       defaultInputOffV,
-			inputThresholdVoltage: defaultInputThreshV,
-		},
 		settingsFile,
 		outputPWMController,
 	)
 
 	http.HandleFunc("/api/state", handleGetState(stateCommands))
+	http.HandleFunc("/api/state/ws", handleStateWebSocket(stateCommands))
+	http.HandleFunc("/api/control/ws", handleControlWebSocket(stateCommands))
 	http.HandleFunc("/api/output/power", handleSetOutputPower(stateCommands))
 	http.HandleFunc("/api/output/pwm", handleSetOutputPWM(stateCommands))
 	http.HandleFunc("/api/label", handleSetLabel(stateCommands))
@@ -322,19 +307,18 @@ func openURLInExternalBrowser(repositoryURL string) error {
 // State owner goroutine.
 // =============================
 
-func runStateOwner(stateCommands <-chan stateCommand, resolvedIOPaths ioPaths, config runtimeConfig, settingsFile string, outputPWMController *pwmController) {
+func runStateOwner(stateCommands <-chan stateCommand, resolvedIOPaths ioPaths, settingsFile string, outputPWMController *pwmController) {
 	loadedSettings := loadSettings(settingsFile)
 	state := buildInitialState(loadedSettings.Labels, indexOutputsByChannel(loadedSettings.Outputs))
 	for _, configuredOutput := range state.Outputs {
 		outputPWMController.Apply(configuredOutput)
 	}
-	inputMetrics := buildInitialInputMetrics()
-	refreshInputSignals(&state, inputMetrics, resolvedIOPaths.inputTemplate, config, time.Now())
+	refreshInputSignals(&state, resolvedIOPaths.inputTemplate)
 
 	for command := range stateCommands {
 		switch command.kind {
 		case "get":
-			refreshInputSignals(&state, inputMetrics, resolvedIOPaths.inputTemplate, config, time.Now())
+			refreshInputSignals(&state, resolvedIOPaths.inputTemplate)
 			command.reply <- stateReply{state: cloneState(state)}
 
 		case "set_output_power":
@@ -390,7 +374,7 @@ func buildInitialState(savedLabels map[string]string, savedOutputs map[int]saved
 		labelKey := "input-" + strconv.Itoa(channelIndex)
 		label := normalizeInputLabel(channelIndex, savedLabels[labelKey])
 
-		inputs = append(inputs, inputState{Channel: channelIndex, Signal: "off", Voltage: "0.0V", Hz: "0.00 Hz", Label: label})
+		inputs = append(inputs, inputState{Channel: channelIndex, Signal: "off", Label: label})
 	}
 
 	outputs := make([]outputState, 0, outputCount)
@@ -548,77 +532,25 @@ func cloneState(source appState) appState {
 	return appState{Inputs: copiedInputs, Outputs: copiedOutputs}
 }
 
-func buildInitialInputMetrics() []inputMetric {
-	initialMetrics := make([]inputMetric, inputCount)
-	for index := range initialMetrics {
-		initialMetrics[index] = inputMetric{lastSignal: "off", lastHz: 0}
-	}
-	return initialMetrics
-}
-
-func refreshInputSignals(state *appState, inputMetrics []inputMetric, inputPathTemplate string, config runtimeConfig, currentTime time.Time) {
+func refreshInputSignals(state *appState, inputPathTemplate string) {
 	for index := range state.Inputs {
 		rawInputSignal, err := readInputSignal(index+1, inputPathTemplate)
 		if err != nil {
 			continue
 		}
 
-		nextVoltage, nextSignal := parseInputVoltageAndSignal(rawInputSignal, config)
-		state.Inputs[index].Signal = nextSignal
-		state.Inputs[index].Voltage = formatVoltage(nextVoltage)
-		nextFrequency := updateFrequencyMetric(&inputMetrics[index], nextSignal, currentTime)
-		state.Inputs[index].Hz = formatFrequency(nextFrequency)
+		state.Inputs[index].Signal = parseInputSignal(rawInputSignal)
 	}
 }
 
-func parseInputVoltageAndSignal(rawInputSignal string, config runtimeConfig) (float64, string) {
+func parseInputSignal(rawInputSignal string) string {
 	trimmedSignal := strings.TrimSpace(rawInputSignal)
-
-	// Treat common GPIO digital tokens first so sysfs "0"/"1" keep explicit digital voltage mapping.
-	switch trimmedSignal {
-	case "1":
-		return config.inputOnVoltage, "on"
-	case "0":
-		return config.inputOffVoltage, "off"
+	switch strings.ToLower(trimmedSignal) {
+	case "1", "on", "high", "true":
+		return "on"
+	default:
+		return "off"
 	}
-
-	if parsedVoltage, err := strconv.ParseFloat(trimmedSignal, 64); err == nil {
-		nextSignal := "off"
-		if parsedVoltage >= config.inputThresholdVoltage {
-			nextSignal = "on"
-		}
-		return parsedVoltage, nextSignal
-	}
-
-	return config.inputOffVoltage, "off"
-}
-
-func updateFrequencyMetric(metric *inputMetric, nextSignal string, currentTime time.Time) float64 {
-	if metric.lastSignal == "" {
-		metric.lastSignal = nextSignal
-		return metric.lastHz
-	}
-
-	if metric.lastSignal != nextSignal {
-		if !metric.lastEdgeAt.IsZero() {
-			secondsBetweenEdges := currentTime.Sub(metric.lastEdgeAt).Seconds()
-			if secondsBetweenEdges > 0 {
-				metric.lastHz = 1.0 / (2.0 * secondsBetweenEdges)
-			}
-		}
-		metric.lastEdgeAt = currentTime
-		metric.lastSignal = nextSignal
-	}
-
-	return metric.lastHz
-}
-
-func formatVoltage(voltage float64) string {
-	return fmt.Sprintf("%.2fV", voltage)
-}
-
-func formatFrequency(frequencyHz float64) string {
-	return fmt.Sprintf("%.2f Hz", frequencyHz)
 }
 
 func startPWMController(outputPathTemplate string, pwmFrequencyHz float64) *pwmController {
@@ -859,10 +791,7 @@ func saveSettings(settingsFile string, state appState) error {
 
 func handleGetState(stateCommands chan<- stateCommand) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
-		reply := make(chan stateReply, 1)
-		stateCommands <- stateCommand{kind: "get", reply: reply}
-
-		result := <-reply
+		result := requestStateSnapshot(stateCommands)
 		if result.err != nil {
 			http.Error(writer, result.err.Error(), http.StatusInternalServerError)
 			return
@@ -870,6 +799,283 @@ func handleGetState(stateCommands chan<- stateCommand) http.HandlerFunc {
 
 		writeJSON(writer, result.state)
 	}
+}
+
+func handleStateWebSocket(stateCommands chan<- stateCommand) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		websocketConnection, err := upgradeToWebSocket(writer, request)
+		if err != nil {
+			http.Error(writer, "websocket upgrade failed", http.StatusBadRequest)
+			return
+		}
+		defer websocketConnection.Close()
+
+		latestStateReply := requestStateSnapshot(stateCommands)
+		if latestStateReply.err != nil {
+			log.Printf("websocket: initial state failed: %v", latestStateReply.err)
+			return
+		}
+		if err := websocketConnection.WriteState(latestStateReply.state); err != nil {
+			return
+		}
+
+		streamTicker := time.NewTicker(350 * time.Millisecond)
+		defer streamTicker.Stop()
+		for {
+			<-streamTicker.C
+			currentStateReply := requestStateSnapshot(stateCommands)
+			if currentStateReply.err != nil {
+				return
+			}
+			if err := websocketConnection.WriteState(currentStateReply.state); err != nil {
+				return
+			}
+		}
+	}
+}
+
+type webSocketConnection struct {
+	socket net.Conn
+}
+
+type controlWebSocketRequest struct {
+	RequestID string `json:"request_id"`
+	Kind      string `json:"kind"`
+	Power     string `json:"power"`
+	PWM       int    `json:"pwm"`
+}
+
+type controlWebSocketResponse struct {
+	RequestID string   `json:"request_id"`
+	OK        bool     `json:"ok"`
+	Error     string   `json:"error,omitempty"`
+	Channel   int      `json:"channel"`
+	Kind      string   `json:"kind"`
+	State     appState `json:"state"`
+}
+
+func upgradeToWebSocket(writer http.ResponseWriter, request *http.Request) (*webSocketConnection, error) {
+	if !isWebSocketOriginAllowed(request) {
+		return nil, errors.New("origin is not allowed")
+	}
+	if !strings.EqualFold(request.Header.Get("Upgrade"), "websocket") {
+		return nil, errors.New("missing websocket upgrade header")
+	}
+	if !strings.Contains(strings.ToLower(request.Header.Get("Connection")), "upgrade") {
+		return nil, errors.New("missing connection upgrade token")
+	}
+	websocketKey := strings.TrimSpace(request.Header.Get("Sec-WebSocket-Key"))
+	if websocketKey == "" {
+		return nil, errors.New("missing websocket key")
+	}
+
+	websocketAcceptor := buildWebSocketAcceptValue(websocketKey)
+	hijacker, canHijack := writer.(http.Hijacker)
+	if !canHijack {
+		return nil, errors.New("http hijacker unavailable")
+	}
+	socket, bufferedWriter, err := hijacker.Hijack()
+	if err != nil {
+		return nil, err
+	}
+
+	upgradeResponse := "HTTP/1.1 101 Switching Protocols\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Accept: " + websocketAcceptor + "\r\n\r\n"
+	if _, err := bufferedWriter.WriteString(upgradeResponse); err != nil {
+		_ = socket.Close()
+		return nil, err
+	}
+	if err := bufferedWriter.Flush(); err != nil {
+		_ = socket.Close()
+		return nil, err
+	}
+
+	return &webSocketConnection{socket: socket}, nil
+}
+
+func isWebSocketOriginAllowed(request *http.Request) bool {
+	originText := strings.TrimSpace(request.Header.Get("Origin"))
+	if originText == "" {
+		return true
+	}
+
+	originURL, err := url.Parse(originText)
+	if err != nil {
+		return false
+	}
+	if originURL.Host == "" || request.Host == "" {
+		return false
+	}
+	return strings.EqualFold(originURL.Host, request.Host)
+}
+
+func buildWebSocketAcceptValue(websocketKey string) string {
+	const websocketAcceptMagic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+	acceptHash := sha1.Sum([]byte(websocketKey + websocketAcceptMagic))
+	return base64.StdEncoding.EncodeToString(acceptHash[:])
+}
+
+func (connection *webSocketConnection) Close() error {
+	return connection.socket.Close()
+}
+
+func (connection *webSocketConnection) WriteState(state appState) error {
+	encodedState, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	return connection.writeTextFrame(encodedState)
+}
+
+func (connection *webSocketConnection) ReadJSON(target any) error {
+	readPayload, err := connection.readClientTextFrame()
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(readPayload, target)
+}
+
+func (connection *webSocketConnection) writeTextFrame(payload []byte) error {
+	frameHeader := []byte{0x81}
+	payloadLength := len(payload)
+	if payloadLength <= 125 {
+		frameHeader = append(frameHeader, byte(payloadLength))
+	} else if payloadLength <= 65535 {
+		frameHeader = append(frameHeader, 126, byte(payloadLength>>8), byte(payloadLength))
+	} else {
+		frameHeader = append(frameHeader, 127,
+			byte(payloadLength>>56), byte(payloadLength>>48), byte(payloadLength>>40), byte(payloadLength>>32),
+			byte(payloadLength>>24), byte(payloadLength>>16), byte(payloadLength>>8), byte(payloadLength))
+	}
+	if err := connection.socket.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		return err
+	}
+	if _, err := connection.socket.Write(frameHeader); err != nil {
+		return err
+	}
+	if _, err := connection.socket.Write(payload); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (connection *webSocketConnection) readClientTextFrame() ([]byte, error) {
+	frameHeader := make([]byte, 2)
+	if _, err := io.ReadFull(connection.socket, frameHeader); err != nil {
+		return nil, err
+	}
+
+	opcode := frameHeader[0] & 0x0F
+	isMasked := frameHeader[1]&0x80 != 0
+	if !isMasked {
+		return nil, errors.New("client frame must be masked")
+	}
+
+	payloadLength := int(frameHeader[1] & 0x7F)
+	switch payloadLength {
+	case 126:
+		extendedLength := make([]byte, 2)
+		if _, err := io.ReadFull(connection.socket, extendedLength); err != nil {
+			return nil, err
+		}
+		payloadLength = int(binary.BigEndian.Uint16(extendedLength))
+	case 127:
+		extendedLength := make([]byte, 8)
+		if _, err := io.ReadFull(connection.socket, extendedLength); err != nil {
+			return nil, err
+		}
+		parsedLength := binary.BigEndian.Uint64(extendedLength)
+		if parsedLength > 8*1024*1024 {
+			return nil, errors.New("frame too large")
+		}
+		payloadLength = int(parsedLength)
+	}
+
+	maskingKey := make([]byte, 4)
+	if _, err := io.ReadFull(connection.socket, maskingKey); err != nil {
+		return nil, err
+	}
+	payload := make([]byte, payloadLength)
+	if _, err := io.ReadFull(connection.socket, payload); err != nil {
+		return nil, err
+	}
+	for index := range payload {
+		payload[index] ^= maskingKey[index%4]
+	}
+
+	switch opcode {
+	case 0x1:
+		return payload, nil
+	case 0x8:
+		return nil, io.EOF
+	default:
+		return nil, errors.New("unsupported opcode")
+	}
+}
+
+func handleControlWebSocket(stateCommands chan<- stateCommand) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		channelText := strings.TrimSpace(request.URL.Query().Get("channel"))
+		channelNumber, err := strconv.Atoi(channelText)
+		if err != nil || channelNumber < 1 || channelNumber > outputCount {
+			http.Error(writer, "invalid channel", http.StatusBadRequest)
+			return
+		}
+
+		websocketConnection, err := upgradeToWebSocket(writer, request)
+		if err != nil {
+			http.Error(writer, "websocket upgrade failed", http.StatusBadRequest)
+			return
+		}
+		defer websocketConnection.Close()
+
+		for {
+			var controlRequest controlWebSocketRequest
+			if err := websocketConnection.ReadJSON(&controlRequest); err != nil {
+				return
+			}
+
+			controlReply := stateReply{state: requestStateSnapshot(stateCommands).state}
+			switch controlRequest.Kind {
+			case "power":
+				reply := make(chan stateReply, 1)
+				stateCommands <- stateCommand{kind: "set_output_power", channel: channelNumber, power: controlRequest.Power, reply: reply}
+				controlReply = <-reply
+			case "pwm":
+				reply := make(chan stateReply, 1)
+				stateCommands <- stateCommand{kind: "set_output_pwm", channel: channelNumber, pwm: controlRequest.PWM, reply: reply}
+				controlReply = <-reply
+			default:
+				controlReply.err = errors.New("unknown control kind")
+			}
+
+			controlResponse := controlWebSocketResponse{
+				RequestID: controlRequest.RequestID,
+				OK:        controlReply.err == nil,
+				Channel:   channelNumber,
+				Kind:      controlRequest.Kind,
+				State:     controlReply.state,
+			}
+			if controlReply.err != nil {
+				controlResponse.Error = controlReply.err.Error()
+			}
+			encodedResponse, err := json.Marshal(controlResponse)
+			if err != nil {
+				return
+			}
+			if err := websocketConnection.writeTextFrame(encodedResponse); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func requestStateSnapshot(stateCommands chan<- stateCommand) stateReply {
+	reply := make(chan stateReply, 1)
+	stateCommands <- stateCommand{kind: "get", reply: reply}
+	return <-reply
 }
 
 func handleSetOutputPower(stateCommands chan<- stateCommand) http.HandlerFunc {

@@ -26,7 +26,113 @@
     .layout { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: clamp(6px, 0.8vw, 12px); align-items: start; }
     .panel { background: rgba(18, 26, 47, var(--ui-alpha)); border: 1px solid var(--card-border); border-radius: 12px; padding: 6px; display: flex; flex-direction: column; }
     .panel h2 { margin: 0 0 8px; font-size: clamp(11px, 1vw, 15px); }
+    .panel-subtitle { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: #c8d3ec; }
     .channels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+    .port-indicator-table {
+      width: 100%;
+      border: 1px solid #2c3a57;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 6px;
+      background: rgba(8, 13, 25, var(--ui-alpha));
+    }
+    .port-indicator-grid {
+      display: grid;
+      grid-template-columns: repeat(10, minmax(0, 1fr));
+      gap: 0;
+    }
+    .port-indicator-cell {
+      border-right: 1px solid #22304b;
+      border-bottom: 1px solid #22304b;
+      min-height: 38px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      font-size: 11px;
+      color: var(--muted);
+      padding: 4px 2px;
+    }
+    .port-indicator-cell:nth-child(10n) {
+      border-right: none;
+    }
+    .port-indicator-cell.bottom-row {
+      border-bottom: none;
+    }
+    .port-indicator-cell.reserved {
+      background: rgba(15, 23, 42, 0.45);
+    }
+    .port-indicator-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(100, 116, 139, var(--ui-alpha));
+    }
+    .port-indicator-dot.on {
+      background: rgba(34, 197, 94, var(--ui-alpha));
+      box-shadow: 0 0 10px rgba(34, 197, 94, 0.95);
+    }
+    .port-indicator-label {
+      font-size: 10px;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+    }
+    .port-indicator-pin {
+      font-size: 10px;
+      color: #d4ddf2;
+      font-family: "Segoe UI", "Roboto Mono", monospace;
+    }
+    .port-indicator-footer {
+      border-top: 1px solid #22304b;
+      padding: 6px 8px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 11px;
+      color: #b2bfd9;
+    }
+    .port-indicator-link-state {
+      font-family: "Segoe UI", "Roboto Mono", monospace;
+    }
+    .port-hover-tooltip {
+      position: fixed;
+      z-index: 2000;
+      max-width: 320px;
+      pointer-events: none;
+      background: rgba(2, 6, 23, 0.96);
+      border: 1px solid #334155;
+      border-radius: 8px;
+      color: #e7edf8;
+      padding: 8px 10px;
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: pre-line;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+      opacity: 0;
+      transform: translate3d(0, 0, 0);
+      transition: opacity 120ms ease;
+    }
+    .port-hover-tooltip.visible {
+      opacity: 1;
+    }
+    .port-hover-tooltip-title {
+      font-size: 14px;
+      font-weight: 800;
+      color: #86efac;
+      margin-bottom: 6px;
+      letter-spacing: 0.2px;
+    }
+    .port-hover-tooltip-line {
+      margin: 4px 0;
+      color: #d7e2fa;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .port-hover-tooltip-line.bullet::before {
+      content: "• ";
+      color: #93c5fd;
+    }
     .channel-card { border: 1px solid var(--card-border); border-radius: 10px; padding: 5px; display: flex; flex-direction: column; gap: 4px; background: rgba(9, 14, 28, var(--ui-alpha)); }
     .io-buttons { display: flex; gap: 6px; }
     button { border: 1px solid transparent; border-radius: 8px; height: clamp(24px, 2vw, 32px); font-size: clamp(11px, 0.9vw, 13px); color: white; cursor: pointer; background: rgba(51, 65, 85, var(--ui-alpha)); }
@@ -117,8 +223,8 @@
       margin-left: 14px;
     }
     .input-label-title {
-      font-size: 14px;
-      font-weight: 700;
+      font-size: 12px;
+      font-weight: 800;
       letter-spacing: 0.2px;
       text-transform: uppercase;
       max-width: 82%;
@@ -150,25 +256,26 @@
       padding: 0 8px;
       font-size: 13px;
     }
-    .input-voltage-line {
+    .input-port-line {
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 28px;
+      font-size: 30px;
       font-weight: 800;
       letter-spacing: 0.5px;
       font-family: "Segoe UI", "Roboto Mono", monospace;
       color: #dbe7ff;
       min-height: 34px;
+      text-transform: uppercase;
     }
-    .input-voltage-line.on { color: #86efac; }
+    .input-port-line.on { color: #86efac; font-weight: 900; }
     .input-status-line {
       display: flex;
       justify-content: center;
-      font-size: 11px;
+      font-size: 12px;
       color: var(--muted);
       text-transform: uppercase;
-      letter-spacing: 0.7px;
+      letter-spacing: 0.8px;
     }
     .output-display {
       position: relative;
@@ -202,6 +309,22 @@
     }
     .output-label-title { font-size: clamp(11px, 1vw, 14px); font-weight: 700; text-transform: uppercase; max-width: 78%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .output-header-actions { display: flex; gap: 6px; }
+    .output-command-indicator {
+      margin-left: 14px;
+      font-size: 10px;
+      letter-spacing: 0.7px;
+      text-transform: uppercase;
+      color: #94a3b8;
+      min-height: 12px;
+    }
+    .output-command-indicator.sending {
+      color: #fbbf24;
+      font-weight: 700;
+    }
+    .output-command-indicator.applied {
+      color: #86efac;
+      font-weight: 700;
+    }
     .output-name-editor {
       display: flex;
       gap: 6px;
@@ -245,7 +368,17 @@
 
   <section class="layout">
     <article class="panel">
-      <h2>Датчики (реальные пины 1..8)</h2>
+      <h2>ECX-1000 порты DIO/GPIO:</h2>
+      <section class="port-indicator-table">
+        <div id="port-indicator-grid" class="port-indicator-grid"></div>
+        <div class="port-indicator-footer">
+          <span>DI 1-8</span>
+          <span>DO 11-18</span>
+          <span>PIN20: external VDC</span>
+          <span id="port-link-state" class="port-indicator-link-state">WS: connecting…</span>
+        </div>
+      </section>
+      <p class="panel-subtitle">Датчики (реальные пины 1..8)</p>
       <div id="input-grid" class="channels"></div>
     </article>
 
@@ -259,6 +392,7 @@
   </footer>
 </main>
 </div>
+<div id="port-hover-tooltip" class="port-hover-tooltip"></div>
 
 <script>
   const applicationModel = {
@@ -275,16 +409,27 @@
     timerValidationMessageByChannel: {},
     reverseToggleQueue: [],
     reverseToggleQueuedByChannel: {},
-    reverseToggleProcessing: false
+    reverseToggleProcessing: false,
+    websocketConnected: false,
+    outputControlInFlightByChannel: {},
+    outputLastAppliedAtByChannel: {},
+    outputIndicatorRefreshTimerByChannel: {},
+    lastStateSignature: "",
+    lastRenderedCountdownSecondByChannel: {}
   };
   const outputMaxVoltage = 3.3;
 
   const viewportFitElement = document.getElementById("viewport-fit");
   const applicationRootElement = document.getElementById("application-root");
   const inputGridElement = document.getElementById("input-grid");
+  const portIndicatorGridElement = document.getElementById("port-indicator-grid");
   const outputGridElement = document.getElementById("output-grid");
   const errorTextElement = document.getElementById("error-text");
   const repositoryLinkElement = document.getElementById("repository-link");
+  const portLinkStateElement = document.getElementById("port-link-state");
+  const portHoverTooltipElement = document.getElementById("port-hover-tooltip");
+  const controlChannelSocketsByChannel = {};
+  let outputControlRequestSequence = 1;
 
   repositoryLinkElement.addEventListener("click", function handleRepositoryLinkClick(clickEvent) {
     clickEvent.preventDefault();
@@ -295,9 +440,205 @@
 
   function renderFromModel() {
     errorTextElement.textContent = applicationModel.errorText;
+    renderPortIndicatorTable();
     renderInputs();
     renderOutputs();
     updateApplicationScale();
+  }
+
+  function renderPortIndicatorTable() {
+    const orderedPortDescriptors = buildOrderedPortDescriptors();
+
+    portIndicatorGridElement.innerHTML = "";
+    orderedPortDescriptors.forEach(function renderSinglePort(portDescriptor, descriptorIndex) {
+      const portCellElement = document.createElement("div");
+      portCellElement.className = "port-indicator-cell";
+      if (descriptorIndex >= 10) {
+        portCellElement.classList.add("bottom-row");
+      }
+      if (portDescriptor.type !== "DI" && portDescriptor.type !== "DO") {
+        portCellElement.classList.add("reserved");
+      }
+      const tooltipText = buildPortTooltipText(portDescriptor);
+      portCellElement.dataset.tooltipText = tooltipText;
+      portCellElement.addEventListener("mouseenter", function handlePortMouseEnter(mouseEvent) {
+        showPortHoverTooltip(mouseEvent.currentTarget.dataset.tooltipText, mouseEvent.clientX, mouseEvent.clientY);
+      });
+      portCellElement.addEventListener("mousemove", function handlePortMouseMove(mouseEvent) {
+        showPortHoverTooltip(mouseEvent.currentTarget.dataset.tooltipText, mouseEvent.clientX, mouseEvent.clientY);
+      });
+      portCellElement.addEventListener("mouseleave", hidePortHoverTooltip);
+
+      const portIndicatorDotElement = document.createElement("span");
+      portIndicatorDotElement.className = isPortActive(portDescriptor) ? "port-indicator-dot on" : "port-indicator-dot";
+
+      const portPinLabelElement = document.createElement("span");
+      portPinLabelElement.className = "port-indicator-pin";
+      portPinLabelElement.textContent = String(portDescriptor.pinNumber);
+
+      const portIndicatorLabelElement = document.createElement("span");
+      portIndicatorLabelElement.className = "port-indicator-label";
+      portIndicatorLabelElement.textContent = portDescriptor.type;
+
+      portCellElement.appendChild(portIndicatorDotElement);
+      portCellElement.appendChild(portPinLabelElement);
+      portCellElement.appendChild(portIndicatorLabelElement);
+      portIndicatorGridElement.appendChild(portCellElement);
+    });
+
+    portLinkStateElement.textContent = applicationModel.websocketConnected ? "WS: online" : "WS: reconnecting";
+  }
+
+  function buildOrderedPortDescriptors() {
+    const topRowDescriptors = [];
+    for (let topRowPinNumber = 20; topRowPinNumber >= 11; topRowPinNumber -= 1) {
+      topRowDescriptors.push(describePhysicalPin(topRowPinNumber));
+    }
+
+    const bottomRowDescriptors = [];
+    for (let bottomRowPinNumber = 10; bottomRowPinNumber >= 1; bottomRowPinNumber -= 1) {
+      bottomRowDescriptors.push(describePhysicalPin(bottomRowPinNumber));
+    }
+
+    return topRowDescriptors.concat(bottomRowDescriptors);
+  }
+
+  function describePhysicalPin(pinNumber) {
+    if (pinNumber >= 1 && pinNumber <= 8) {
+      return { type: "DI", pinNumber: pinNumber };
+    }
+    if (pinNumber >= 11 && pinNumber <= 18) {
+      return { type: "DO", pinNumber: pinNumber };
+    }
+    if (pinNumber === 9) {
+      return { type: "COM", pinNumber: pinNumber };
+    }
+    if (pinNumber === 10 || pinNumber === 19) {
+      return { type: "GND", pinNumber: pinNumber };
+    }
+    if (pinNumber === 20) {
+      return { type: "VDC", pinNumber: pinNumber };
+    }
+    return { type: "NC", pinNumber: pinNumber };
+  }
+
+  function buildPortTooltipText(portDescriptor) {
+    if (portDescriptor.type === "DI") {
+      return "Пин " + String(portDescriptor.pinNumber) + " • DI вход\n" +
+        "Назначение: дискретный вход (оптопара).\n" +
+        "DI=ON, когда на входе есть допустимый уровень напряжения относительно DI_COM.\n" +
+        "NPN (sink): DI_COM (пин 9) подключают к +V питания, вход DI активируется замыканием на V-.\n" +
+        "PNP (source): DI_COM (пин 9) подключают к V-, вход DI активируется подачей +V на пин DI.\n" +
+        "Практика коммутации: используйте экранированный провод, общий GND через пин 19 (или дублирующий пин 10).\n" +
+        "Измерения в приложении: DI отображается как цифровой сигнал ON/OFF по состоянию входа.";
+    }
+
+    if (portDescriptor.type === "DO") {
+      return "Пин " + String(portDescriptor.pinNumber) + " • DO выход\n" +
+        "Назначение: дискретный выход канала " + String(portDescriptor.pinNumber - 11) + ".\n" +
+        "Использование: управляет внешними устройствами (реле, входы ПЛК, драйверы, сигнализация).\n" +
+        "DO=ON включает линию выхода канала; DO=OFF отключает.\n" +
+        "Для стабильной коммутации: общий провод устройств ведите на GND пин 19 (дублирован на пине 10), питание DIO подайте на пин 20.\n" +
+        "PWM в приложении: это software PWM (переключение ON/OFF по времени), а не подтвержденный аппаратный PWM линии.";
+    }
+
+    if (portDescriptor.type === "COM") {
+      return "Пин 9 • DI_COM\n" +
+        "Общий контакт входов DI1..DI8.\n" +
+        "Выбор режима:\n" +
+        "- NPN (sink): DI_COM -> +V, срабатывание DI через замыкание входа на V-.\n" +
+        "- PNP (source): DI_COM -> V-, срабатывание DI через подачу +V на вход.\n" +
+        "Важно: все DI в группе используют общий DI_COM, не смешивайте NPN и PNP в одной группе без развязки.\n" +
+        "DI данные по API обычно цифровые (0/1), не полноценный АЦП-канал.";
+    }
+
+    if (portDescriptor.type === "GND") {
+      return "Пин 19 • DIO_GND (дублирован на пине 10)\n" +
+        "Общий GND для DIO и внешних устройств.\n" +
+        "Использование: общий минус для DI/DO цепей, обратный провод питания, reference для безопасной коммутации.";
+    }
+
+    if (portDescriptor.type === "VDC") {
+      return "Пин 20 • External VDC\n" +
+        "Питание DIO: внешний +6..40V (NPN) или +6..48V (PNP).\n" +
+        "Использование: линия питания для DI/DO цепей и внешних устройств, управляемых DO.\n" +
+        "Перед подачей питания проверьте полярность и соответствие режиму NPN/PNP.\n" +
+        "Не использовать как обычный DI/DO канал.";
+    }
+
+    return "Пин " + String(portDescriptor.pinNumber) + " • NC\n" +
+      "Служебный контакт без пользовательского DI/DO канала.\n" +
+      "Использование: оставить неподключённым, если нет отдельной схемы из мануала.";
+  }
+
+  function showPortHoverTooltip(tooltipText, pointerClientX, pointerClientY) {
+    portHoverTooltipElement.innerHTML = buildPortTooltipMarkup(tooltipText);
+    portHoverTooltipElement.classList.add("visible");
+
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const tooltipRect = portHoverTooltipElement.getBoundingClientRect();
+
+    let tooltipLeft = pointerClientX + 14;
+    let tooltipTop = pointerClientY + 14;
+
+    if (tooltipLeft + tooltipRect.width > viewportWidth - 8) {
+      tooltipLeft = Math.max(8, pointerClientX - tooltipRect.width - 14);
+    }
+    if (tooltipTop + tooltipRect.height > viewportHeight - 8) {
+      tooltipTop = Math.max(8, pointerClientY - tooltipRect.height - 14);
+    }
+
+    portHoverTooltipElement.style.left = String(tooltipLeft) + "px";
+    portHoverTooltipElement.style.top = String(tooltipTop) + "px";
+  }
+
+  function hidePortHoverTooltip() {
+    portHoverTooltipElement.classList.remove("visible");
+  }
+
+  function buildPortTooltipMarkup(tooltipText) {
+    const tooltipLines = String(tooltipText).split("\n").filter(function keepNonEmptyLine(singleLine) {
+      return singleLine.trim() !== "";
+    });
+    if (tooltipLines.length === 0) {
+      return "";
+    }
+
+    const titleMarkup = "<div class=\"port-hover-tooltip-title\">" + escapeHTMLText(tooltipLines[0]) + "</div>";
+    const bodyLines = tooltipLines.slice(1).map(function convertBodyLine(singleLine) {
+      const trimmedLine = singleLine.trim();
+      const isBulletLine = trimmedLine.startsWith("-");
+      const lineContent = isBulletLine ? trimmedLine.slice(1).trim() : trimmedLine;
+      const lineClassName = isBulletLine ? "port-hover-tooltip-line bullet" : "port-hover-tooltip-line";
+      return "<div class=\"" + lineClassName + "\">" + escapeHTMLText(lineContent) + "</div>";
+    });
+
+    return titleMarkup + bodyLines.join("");
+  }
+
+  function escapeHTMLText(rawText) {
+    return String(rawText)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll("\"", "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  function isPortActive(portDescriptor) {
+    if (portDescriptor.type === "DI") {
+      const inputState = applicationModel.inputsByChannel[portDescriptor.pinNumber];
+      return Boolean(inputState && inputState.signal === "on");
+    }
+
+    if (portDescriptor.type === "DO") {
+      const outputChannel = portDescriptor.pinNumber - 10;
+      const outputState = applicationModel.outputsByChannel[outputChannel];
+      return Boolean(outputState && outputState.power === "on");
+    }
+
+    return false;
   }
 
   function updateApplicationScale() {
@@ -339,6 +680,27 @@
       const inputCornerIndicatorElement = document.createElement("span");
       inputCornerIndicatorElement.className = inputState.signal === "on" ? "input-corner-indicator on" : "input-corner-indicator";
 
+      const inputHeaderRowElement = document.createElement("div");
+      inputHeaderRowElement.className = "input-header-row";
+
+      const inputLabelTitleElement = document.createElement("div");
+      inputLabelTitleElement.className = "input-label-title";
+      inputLabelTitleElement.textContent = "DI" + String(inputChannel);
+
+      inputHeaderRowElement.appendChild(inputLabelTitleElement);
+      if (!isEditingInputLabel) {
+        const editInputNameButtonElement = document.createElement("button");
+        editInputNameButtonElement.className = "input-icon-button";
+        editInputNameButtonElement.textContent = "✎";
+        editInputNameButtonElement.disabled = applicationModel.pendingRequest;
+        editInputNameButtonElement.addEventListener("click", function handleInputLabelEditStart() {
+          applicationModel.editingInputLabelsByChannel[inputChannel] = inputState.label;
+          renderFromModel();
+        });
+        inputHeaderRowElement.appendChild(editInputNameButtonElement);
+      }
+      inputDisplayElement.appendChild(inputHeaderRowElement);
+
       if (isEditingInputLabel) {
         const inputNameEditorElement = document.createElement("div");
         inputNameEditorElement.className = "input-name-editor";
@@ -361,39 +723,18 @@
         inputNameEditorElement.appendChild(inputNameFieldElement);
         inputNameEditorElement.appendChild(saveInputNameButtonElement);
         inputDisplayElement.appendChild(inputNameEditorElement);
-      } else {
-        const inputHeaderRowElement = document.createElement("div");
-        inputHeaderRowElement.className = "input-header-row";
-
-        const inputLabelTitleElement = document.createElement("div");
-        inputLabelTitleElement.className = "input-label-title";
-        inputLabelTitleElement.textContent = inputState.label;
-
-        const editInputNameButtonElement = document.createElement("button");
-        editInputNameButtonElement.className = "input-icon-button";
-        editInputNameButtonElement.textContent = "✎";
-        editInputNameButtonElement.disabled = applicationModel.pendingRequest;
-        editInputNameButtonElement.addEventListener("click", function handleInputLabelEditStart() {
-          applicationModel.editingInputLabelsByChannel[inputChannel] = inputState.label;
-          renderFromModel();
-        });
-
-        inputHeaderRowElement.appendChild(inputLabelTitleElement);
-        inputHeaderRowElement.appendChild(editInputNameButtonElement);
-        inputDisplayElement.appendChild(inputHeaderRowElement);
-
       }
 
-      const inputVoltageLineElement = document.createElement("div");
-      inputVoltageLineElement.className = inputState.signal === "on" ? "input-voltage-line on" : "input-voltage-line";
-      inputVoltageLineElement.textContent = inputState.voltage;
+      const inputPortLineElement = document.createElement("div");
+      inputPortLineElement.className = inputState.signal === "on" ? "input-port-line on" : "input-port-line";
+      inputPortLineElement.textContent = inputState.label || ("DI" + String(inputChannel));
 
       const inputStatusLineElement = document.createElement("div");
       inputStatusLineElement.className = "input-status-line";
-      inputStatusLineElement.textContent = inputState.hz + " • " + (inputState.signal === "on" ? "signal detected" : "no signal");
+      inputStatusLineElement.textContent = inputState.signal === "on" ? "signal detected" : "no signal";
 
       inputDisplayElement.appendChild(inputCornerIndicatorElement);
-      inputDisplayElement.appendChild(inputVoltageLineElement);
+      inputDisplayElement.appendChild(inputPortLineElement);
       inputDisplayElement.appendChild(inputStatusLineElement);
 
       inputCardElement.appendChild(inputDisplayElement);
@@ -491,13 +832,18 @@
 
       }
 
+      const outputCommandIndicatorElement = document.createElement("div");
+      outputCommandIndicatorElement.className = buildOutputCommandIndicatorClassName(outputChannel);
+      outputCommandIndicatorElement.textContent = buildOutputCommandIndicatorText(outputChannel);
+      outputDisplayElement.appendChild(outputCommandIndicatorElement);
+
       const buttonsRowElement = document.createElement("div");
       buttonsRowElement.className = "io-buttons";
 
       const enableOutputButtonElement = document.createElement("button");
       enableOutputButtonElement.className = outputState.power === "on" ? "button-on active" : "button-on";
       enableOutputButtonElement.textContent = "ON";
-      enableOutputButtonElement.disabled = applicationModel.pendingRequest;
+      enableOutputButtonElement.disabled = false;
       enableOutputButtonElement.addEventListener("click", function handleEnableOutput() {
         void sendOutputPowerToServer(outputChannel, "on", { startCountdownAfterChange: true, cancelCountdownBeforeChange: false });
       });
@@ -522,7 +868,7 @@
       pwmSliderElement.max = "100";
       pwmSliderElement.step = "1";
       pwmSliderElement.value = String(outputState.pwm);
-      pwmSliderElement.disabled = applicationModel.pendingRequest;
+      pwmSliderElement.disabled = false;
       pwmSliderElement.addEventListener("pointerdown", function handleOutputSliderPointerDown() {
         applicationModel.activeOutputSliderByChannel[outputChannel] = true;
       });
@@ -640,6 +986,11 @@
       return;
     }
 
+    const nextStateSignature = JSON.stringify(serverState);
+    if (!mustForceApply && nextStateSignature === applicationModel.lastStateSignature) {
+      return;
+    }
+
     const nextInputsByChannel = {};
     serverState.inputs.forEach(function registerInput(inputState) {
       nextInputsByChannel[inputState.channel] = inputState;
@@ -655,6 +1006,7 @@
     syncTimerDefaultsWithOutputs(nextOutputsByChannel);
     clearEndedCountdowns(nextOutputsByChannel);
     applicationModel.errorText = "";
+    applicationModel.lastStateSignature = nextStateSignature;
     renderFromModel();
   }
 
@@ -667,22 +1019,124 @@
     return stateResponse.json();
   }
 
+  function ensureControlChannelSocket(outputChannel) {
+    const existingSocketEntry = controlChannelSocketsByChannel[outputChannel];
+    if (existingSocketEntry && existingSocketEntry.socket.readyState === WebSocket.OPEN) {
+      return existingSocketEntry;
+    }
+    if (existingSocketEntry && existingSocketEntry.socket.readyState === WebSocket.CONNECTING) {
+      return existingSocketEntry;
+    }
+
+    const webSocketScheme = window.location.protocol === "https:" ? "wss" : "ws";
+    const controlWebSocketEndpoint = webSocketScheme + "://" + window.location.host + "/api/control/ws?channel=" + String(outputChannel);
+    const controlWebSocket = new WebSocket(controlWebSocketEndpoint);
+    const socketEntry = {
+      socket: controlWebSocket,
+      queuedCommandPayload: null,
+      inFlightRequestID: "",
+      lastSentAtMs: 0
+    };
+    controlChannelSocketsByChannel[outputChannel] = socketEntry;
+
+    controlWebSocket.addEventListener("open", function handleControlSocketOpen() {
+      flushOutputControlCommand(outputChannel);
+    });
+
+    controlWebSocket.addEventListener("message", function handleControlSocketMessage(messageEvent) {
+      try {
+        const controlResponse = JSON.parse(messageEvent.data);
+        if (controlResponse.request_id && controlResponse.request_id === socketEntry.inFlightRequestID) {
+          socketEntry.inFlightRequestID = "";
+        }
+        if (controlResponse.ok && controlResponse.state) {
+          applyStateFromServer(controlResponse.state, true);
+          applicationModel.outputLastAppliedAtByChannel[outputChannel] = Date.now();
+          scheduleOutputCommandIndicatorRefresh(outputChannel);
+        } else if (!controlResponse.ok) {
+          applicationModel.errorText = controlResponse.error || "control command failed";
+        }
+      } catch (controlMessageParseError) {
+        applicationModel.errorText = String(controlMessageParseError);
+      } finally {
+        delete applicationModel.outputControlInFlightByChannel[outputChannel];
+        flushOutputControlCommand(outputChannel);
+        renderFromModel();
+      }
+    });
+
+    controlWebSocket.addEventListener("close", function handleControlSocketClose() {
+      delete applicationModel.outputControlInFlightByChannel[outputChannel];
+      delete controlChannelSocketsByChannel[outputChannel];
+      renderFromModel();
+    });
+
+    controlWebSocket.addEventListener("error", function handleControlSocketError() {
+      controlWebSocket.close();
+    });
+
+    return socketEntry;
+  }
+
+  function flushOutputControlCommand(outputChannel) {
+    const socketEntry = ensureControlChannelSocket(outputChannel);
+    if (socketEntry.socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    if (socketEntry.inFlightRequestID !== "") {
+      return;
+    }
+    if (!socketEntry.queuedCommandPayload) {
+      return;
+    }
+
+    const requestID = "command-" + String(outputChannel) + "-" + String(outputControlRequestSequence);
+    outputControlRequestSequence += 1;
+    const outgoingPayload = {
+      request_id: requestID,
+      kind: socketEntry.queuedCommandPayload.kind,
+      power: socketEntry.queuedCommandPayload.power,
+      pwm: socketEntry.queuedCommandPayload.pwm
+    };
+    socketEntry.inFlightRequestID = requestID;
+    socketEntry.lastSentAtMs = Date.now();
+    socketEntry.queuedCommandPayload = null;
+    applicationModel.outputControlInFlightByChannel[outputChannel] = requestID;
+    socketEntry.socket.send(JSON.stringify(outgoingPayload));
+  }
+
+  function sendOutputControlCommand(outputChannel, commandPayload) {
+    const socketEntry = ensureControlChannelSocket(outputChannel);
+    if (commandPayload.kind === "power" && commandPayload.power === "off") {
+      socketEntry.queuedCommandPayload = commandPayload;
+    } else if (!socketEntry.queuedCommandPayload) {
+      socketEntry.queuedCommandPayload = commandPayload;
+    } else if (commandPayload.kind === "power" || socketEntry.queuedCommandPayload.kind !== "power") {
+      socketEntry.queuedCommandPayload = commandPayload;
+    }
+
+    const nowMilliseconds = Date.now();
+    if (socketEntry.inFlightRequestID !== "" && nowMilliseconds-socketEntry.lastSentAtMs > 1000) {
+      socketEntry.inFlightRequestID = "";
+      delete applicationModel.outputControlInFlightByChannel[outputChannel];
+    }
+    if (socketEntry.socket.readyState === WebSocket.OPEN) {
+      flushOutputControlCommand(outputChannel);
+      return;
+    }
+  }
+
   async function sendOutputPowerToServer(outputChannel, nextPower, powerCommandOptions) {
     const commandOptions = powerCommandOptions || { startCountdownAfterChange: false, cancelCountdownBeforeChange: false };
     if (commandOptions.cancelCountdownBeforeChange) {
       clearOutputCountdown(outputChannel);
     }
 
-    let commandSucceeded = false;
-    await runServerCommand(async function sendPowerCommand() {
-      await postOutputPowerCommand(outputChannel, nextPower);
-      commandSucceeded = true;
-      if (commandOptions.startCountdownAfterChange) {
-        startOutputCountdownIfConfigured(outputChannel, nextPower);
-      }
-    });
-
-    return commandSucceeded;
+    sendOutputControlCommand(outputChannel, { kind: "power", power: nextPower });
+    if (commandOptions.startCountdownAfterChange) {
+      startOutputCountdownIfConfigured(outputChannel, nextPower);
+    }
+    return true;
   }
 
   async function sendOutputEmergencyOffToServer(outputChannel) {
@@ -690,49 +1144,11 @@
     applicationModel.errorText = "";
     renderFromModel();
 
-    try {
-      const emergencyOffResponse = await fetch("/api/output/power", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel: outputChannel, power: "off" })
-      });
-      if (!emergencyOffResponse.ok) {
-        throw new Error(await emergencyOffResponse.text());
-      }
-
-      applyStateFromServer(await emergencyOffResponse.json(), true);
-    } catch (emergencyOffError) {
-      applicationModel.errorText = String(emergencyOffError);
-      renderFromModel();
-    }
-  }
-
-  async function postOutputPowerCommand(outputChannel, nextPower) {
-    const powerResponse = await fetch("/api/output/power", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channel: outputChannel, power: nextPower })
-    });
-    if (!powerResponse.ok) {
-      throw new Error(await powerResponse.text());
-    }
-
-    applyStateFromServer(await powerResponse.json(), true);
+    sendOutputControlCommand(outputChannel, { kind: "power", power: "off" });
   }
 
   async function sendOutputPWMToServer(outputChannel, nextPWM) {
-    await runServerCommand(async function sendPWMCommand() {
-      const pwmResponse = await fetch("/api/output/pwm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel: outputChannel, pwm: nextPWM })
-      });
-      if (!pwmResponse.ok) {
-        throw new Error(await pwmResponse.text());
-      }
-
-      applyStateFromServer(await pwmResponse.json(), true);
-    });
+    sendOutputControlCommand(outputChannel, { kind: "pwm", pwm: nextPWM });
   }
 
   async function sendInputLabelToServer(inputChannel, nextLabel) {
@@ -786,22 +1202,86 @@
     return leftNumber - rightNumber;
   }
 
+  function buildOutputCommandIndicatorClassName(outputChannel) {
+    const hasInFlightCommand = Boolean(applicationModel.outputControlInFlightByChannel[outputChannel]);
+    if (hasInFlightCommand) {
+      return "output-command-indicator sending";
+    }
+
+    const lastAppliedTimestampMs = applicationModel.outputLastAppliedAtByChannel[outputChannel] || 0;
+    if (Date.now() - lastAppliedTimestampMs < 1200) {
+      return "output-command-indicator applied";
+    }
+
+    return "output-command-indicator";
+  }
+
+  function buildOutputCommandIndicatorText(outputChannel) {
+    const hasInFlightCommand = Boolean(applicationModel.outputControlInFlightByChannel[outputChannel]);
+    if (hasInFlightCommand) {
+      return "sending…";
+    }
+
+    const lastAppliedTimestampMs = applicationModel.outputLastAppliedAtByChannel[outputChannel] || 0;
+    if (Date.now() - lastAppliedTimestampMs < 1200) {
+      return "applied";
+    }
+
+    return "ready";
+  }
+
+  function scheduleOutputCommandIndicatorRefresh(outputChannel) {
+    const existingTimerIdentifier = applicationModel.outputIndicatorRefreshTimerByChannel[outputChannel];
+    if (existingTimerIdentifier) {
+      window.clearTimeout(existingTimerIdentifier);
+    }
+
+    applicationModel.outputIndicatorRefreshTimerByChannel[outputChannel] = window.setTimeout(function handleIndicatorRefresh() {
+      delete applicationModel.outputIndicatorRefreshTimerByChannel[outputChannel];
+      renderFromModel();
+    }, 1300);
+  }
+
   function formatOutputVoltage(outputPWMPercent) {
     const outputVoltage = (outputPWMPercent / 100) * outputMaxVoltage;
     return outputVoltage.toFixed(2) + "V";
   }
 
-  function startSignalRefreshLoop() {
-    setInterval(function pollState() {
-      if (hasActiveEditing()) {
-        return;
-      }
+  function startStateWebSocketLoop() {
+    const webSocketScheme = window.location.protocol === "https:" ? "wss" : "ws";
+    const webSocketEndpoint = webSocketScheme + "://" + window.location.host + "/api/state/ws";
 
-      requestStateFromServer().then(applyStateFromServer).catch(function handleRefreshError(refreshError) {
-        applicationModel.errorText = String(refreshError);
+    function connectStateWebSocket() {
+      const stateWebSocket = new WebSocket(webSocketEndpoint);
+
+      stateWebSocket.addEventListener("open", function handleWebSocketOpen() {
+        applicationModel.websocketConnected = true;
+        applicationModel.errorText = "";
         renderFromModel();
       });
-    }, 600);
+
+      stateWebSocket.addEventListener("message", function handleWebSocketMessage(messageEvent) {
+        try {
+          const serverState = JSON.parse(messageEvent.data);
+          applyStateFromServer(serverState);
+        } catch (stateParseError) {
+          applicationModel.errorText = String(stateParseError);
+          renderFromModel();
+        }
+      });
+
+      stateWebSocket.addEventListener("close", function handleWebSocketClose() {
+        applicationModel.websocketConnected = false;
+        renderFromModel();
+        window.setTimeout(connectStateWebSocket, 900);
+      });
+
+      stateWebSocket.addEventListener("error", function handleWebSocketError() {
+        stateWebSocket.close();
+      });
+    }
+
+    connectStateWebSocket();
   }
 
   function hasActiveEditing() {
@@ -870,6 +1350,7 @@
     const parsedTimerSpec = parseDurationSpec(timerSpec);
     if (!parsedTimerSpec.ok || parsedTimerSpec.milliseconds <= 0) {
       delete applicationModel.timerCountdownDeadlineByChannel[outputChannel];
+      delete applicationModel.lastRenderedCountdownSecondByChannel[outputChannel];
       return;
     }
 
@@ -912,10 +1393,32 @@
       });
       void processReverseToggleQueue();
 
-      if (!hasActiveEditing()) {
+      if (!hasActiveEditing() && shouldRenderCountdownTick()) {
         renderFromModel();
       }
     }, 200);
+  }
+
+  function shouldRenderCountdownTick() {
+    const countdownChannels = Object.keys(applicationModel.timerCountdownDeadlineByChannel);
+    if (countdownChannels.length === 0) {
+      return false;
+    }
+
+    let hasVisualChange = false;
+    countdownChannels.forEach(function evaluateCountdownChannel(channelKey) {
+      const countdownState = applicationModel.timerCountdownDeadlineByChannel[channelKey];
+      if (!countdownState) {
+        return;
+      }
+      const secondsRemaining = Math.max(0, Math.ceil((countdownState.deadlineAtMs - Date.now()) / 1000));
+      if (applicationModel.lastRenderedCountdownSecondByChannel[channelKey] !== secondsRemaining) {
+        applicationModel.lastRenderedCountdownSecondByChannel[channelKey] = secondsRemaining;
+        hasVisualChange = true;
+      }
+    });
+
+    return hasVisualChange;
   }
 
   async function processReverseToggleQueue() {
@@ -956,18 +1459,21 @@
       const outputState = outputsByChannel[channelKey];
       if (!outputState) {
         delete applicationModel.timerCountdownDeadlineByChannel[channelKey];
+        delete applicationModel.lastRenderedCountdownSecondByChannel[channelKey];
         return;
       }
 
       const countdownState = applicationModel.timerCountdownDeadlineByChannel[channelKey];
       if (outputState.power === countdownState.reversePower) {
         delete applicationModel.timerCountdownDeadlineByChannel[channelKey];
+        delete applicationModel.lastRenderedCountdownSecondByChannel[channelKey];
       }
     });
   }
 
   function clearOutputCountdown(outputChannel) {
     delete applicationModel.timerCountdownDeadlineByChannel[outputChannel];
+    delete applicationModel.lastRenderedCountdownSecondByChannel[outputChannel];
   }
 
   function renderTimerDisplay(outputChannel) {
@@ -990,7 +1496,7 @@
     renderFromModel();
   });
 
-  startSignalRefreshLoop();
+  startStateWebSocketLoop();
   renderFromModel();
 </script>
 </body>
