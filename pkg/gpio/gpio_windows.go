@@ -58,17 +58,22 @@ func Open(config Config) (Adapter, RuntimeMode, error) {
 
 func openWindowsAdapter() (*windowsAdapter, RuntimeMode, error) {
 	searchOrder := windowsDLLSearchOrder()
-	driverProbeEvents := make([]string, 0, len(searchOrder))
+	driverProbeEvents := make([]string, 0, len(searchOrder)*3)
 	for _, dllName := range searchOrder {
+		driverProbeEvents = append(driverProbeEvents, fmt.Sprintf("Try DLL: %s", dllName))
 		adapter, err := tryOpenWindowsAdapter(dllName)
-		if err == nil {
-			driverProbeEvents = append(driverProbeEvents, fmt.Sprintf("ok:%s", filepath.Base(dllName)))
-			return adapter, RuntimeMode{
-				ActiveDriver:   filepath.Base(dllName),
-				DriverProbeLog: strings.Join(driverProbeEvents, "; "),
-			}, nil
+		if err != nil {
+			driverProbeEvents = append(driverProbeEvents, fmt.Sprintf("  FAIL: %v", err))
+			continue
 		}
-		driverProbeEvents = append(driverProbeEvents, fmt.Sprintf("fail:%s (%v)", filepath.Base(dllName), err))
+
+		driverProbeEvents = append(driverProbeEvents, fmt.Sprintf("  OK: loaded %s", filepath.Base(dllName)))
+		driverProbeEvents = append(driverProbeEvents, fmt.Sprintf("GPIO ports are available. Active DLL: %s", filepath.Base(dllName)))
+		driverProbeEvents = append(driverProbeEvents, "Stop probing next DLL files.")
+		return adapter, RuntimeMode{
+			ActiveDriver:   filepath.Base(dllName),
+			DriverProbeLog: strings.Join(driverProbeEvents, "\n"),
+		}, nil
 	}
 
 	return nil, RuntimeMode{}, fmt.Errorf(
@@ -138,8 +143,14 @@ func tryOpenWindowsAdapter(dllName string) (*windowsAdapter, error) {
 		_ = releaseLazyDLL(adapter.dll)
 		return nil, err
 	}
-	adapter.outputMask.Store(0)
 
+	var gpioState uint16
+	if err := adapter.callGetGPIO(&gpioState); err != nil {
+		_ = releaseLazyDLL(adapter.dll)
+		return nil, fmt.Errorf("GPIO ports unavailable in %s: %w", dllName, err)
+	}
+
+	adapter.outputMask.Store(0)
 	return adapter, nil
 }
 

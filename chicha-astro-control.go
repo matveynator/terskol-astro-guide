@@ -180,20 +180,7 @@ func main() {
 	logRuntimeMode(runtimeMode, resolvedIOPaths)
 
 	stateCommands := make(chan stateCommand)
-	runtimeStateData := runtimeState{}
-	if runtimeMode.InputSimulation || runtimeMode.OutputSimulation {
-		runtimeStateData = runtimeState{TestMode: true, MessageKey: "runtime_demo_mode"}
-	}
-	if runtimeMode.ActiveDriver != "" {
-		runtimeStateData.Message = fmt.Sprintf("Windows GPIO driver loaded: %s", runtimeMode.ActiveDriver)
-	}
-	if runtimeMode.DriverProbeLog != "" {
-		if runtimeStateData.Message == "" {
-			runtimeStateData.Message = fmt.Sprintf("Windows GPIO driver probe: %s", runtimeMode.DriverProbeLog)
-		} else {
-			runtimeStateData.Message = fmt.Sprintf("%s | probe: %s", runtimeStateData.Message, runtimeMode.DriverProbeLog)
-		}
-	}
+	runtimeStateData := buildRuntimeStateForUI(runtimeMode)
 
 	outputPWMController := startPWMController(gpioAdapter, defaultPWMFrequency, runtimeMode.OutputSimulation)
 	settingsFile, err := resolveSettingsFilePath(*settingsFileFlag)
@@ -334,15 +321,32 @@ func logRuntimeMode(mode gpio.RuntimeMode, resolvedIOPaths ioPaths) {
 	if mode.ActiveDriver != "" {
 		log.Printf("gpio: windows driver loaded successfully: %s", mode.ActiveDriver)
 	}
-	if mode.DriverProbeLog != "" {
-		log.Printf("gpio: windows driver probe report: %s", mode.DriverProbeLog)
-	}
 	if mode.InputSimulation {
 		log.Printf("gpio: inputs are unavailable, switch to simulation mode. template=%s", resolvedIOPaths.inputTemplate)
 	}
 	if mode.OutputSimulation {
 		log.Printf("gpio: outputs are unavailable, switch to simulation mode. template=%s", resolvedIOPaths.outputTemplate)
 	}
+}
+
+func buildRuntimeStateForUI(mode gpio.RuntimeMode) runtimeState {
+	assembledState := runtimeState{}
+	if mode.InputSimulation || mode.OutputSimulation {
+		assembledState.TestMode = true
+		assembledState.MessageKey = "runtime_demo_mode"
+	}
+
+	probeMessageParts := make([]string, 0, 2)
+	if mode.DriverProbeLog != "" {
+		probeMessageParts = append(probeMessageParts, mode.DriverProbeLog)
+	}
+	if mode.ActiveDriver != "" {
+		probeMessageParts = append(probeMessageParts, fmt.Sprintf("Selected DLL: %s", mode.ActiveDriver))
+	}
+	if len(probeMessageParts) > 0 {
+		assembledState.Message = strings.Join(probeMessageParts, "\n")
+	}
+	return assembledState
 }
 
 func detectIORuntimeMode(resolvedIOPaths ioPaths) ioRuntimeMode {

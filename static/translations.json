@@ -26,7 +26,10 @@
     "tooltip_com": "Pin 9 • DI_COM\nCommon terminal for DI1..DI8.\nDI_COM takes reference potential from external DIO PSU: +V in NPN mode, V- in PNP mode.\nUse the same supply domain as pin 20 and GND pin 19/10.",
     "tooltip_gnd": "Pin 19 • DIO_GND (duplicate on pin 10)\nCommon ground for DI/DO and external devices.\nCurrent return path for DIO circuits.\nSource: common wire of external DIO PSU feeding pin 20.",
     "tooltip_vdc": "Pin 20 • External VDC\nInput for external DIO power domain.\nAllowed range: +6..40V (NPN) or +6..48V (PNP).\nThis rail powers DI/DO circuits and external loads switched by DO.",
-    "tooltip_nc": "Pin {pin} • NC\nService contact without user DI/DO channel.\nDo not feed working voltage, keep unconnected."
+    "tooltip_nc": "Pin {pin} • NC\nService contact without user DI/DO channel.\nDo not feed working voltage, keep unconnected.",
+    "runtime_probe_log_title": "Windows DLL probe log",
+    "runtime_probe_log_close": "Close log",
+    "runtime_probe_log_close_demo": "Read log and continue in demo mode"
   },
   "ru": {
     "html_lang": "ru",
@@ -55,7 +58,10 @@
     "tooltip_com": "Пин 9 • DI_COM\nОбщий контакт для DI1..DI8.\nНа DI_COM подаётся опорный потенциал от внешнего БП DIO: +V для NPN или V- для PNP.\nПитание берите из той же цепи, что заведена на пин 20 и GND 19/10.\nНе смешивайте NPN и PNP в одной группе без развязки.",
     "tooltip_gnd": "Пин 19 • DIO_GND (дублирован на пине 10)\nОбщий минус/земля для DI/DO и внешних устройств.\nСюда возвращается ток от DI/DO цепей.\nИсточник: общий провод внешнего БП DIO, который также питает пин 20.",
     "tooltip_vdc": "Пин 20 • External VDC\nТочка ввода внешнего питания DIO-домена.\nДопустимый диапазон: +6..40V (NPN) или +6..48V (PNP).\nОтсюда берётся питание для DI/DO цепей и внешних нагрузок, управляемых через DO.\nПеред включением проверьте полярность, тип схемы и общий GND на пине 19/10.",
-    "tooltip_nc": "Пин {pin} • NC\nСлужебный контакт без пользовательского DI/DO канала.\nРабочее напряжение не подаётся, оставьте пин неподключённым."
+    "tooltip_nc": "Пин {pin} • NC\nСлужебный контакт без пользовательского DI/DO канала.\nРабочее напряжение не подаётся, оставьте пин неподключённым.",
+    "runtime_probe_log_title": "Лог проверки Windows DLL",
+    "runtime_probe_log_close": "Закрыть лог",
+    "runtime_probe_log_close_demo": "Прочитать лог и запустить демо-режим"
   },
   "de": {
     "html_lang": "de",
@@ -84,7 +90,10 @@
     "tooltip_com": "Pin 9 • DI_COM\nGemeinsamer Kontakt für DI1..DI8-Eingänge.",
     "tooltip_gnd": "Pin 19 • DIO_GND (Duplikat auf Pin 10)\nGemeinsame Masse für DIO und externe Geräte.",
     "tooltip_vdc": "Pin 20 • Externes VDC\nDIO-Versorgung: extern +6..40V (NPN) oder +6..48V (PNP).",
-    "tooltip_nc": "Pin {pin} • NC\nServicekontakt ohne DI/DO-Nutzerkanal."
+    "tooltip_nc": "Pin {pin} • NC\nServicekontakt ohne DI/DO-Nutzerkanal.",
+    "runtime_probe_log_title": "Windows-DLL-Protokoll",
+    "runtime_probe_log_close": "Protokoll schließen",
+    "runtime_probe_log_close_demo": "Protokoll lesen und im Demo-Modus fortfahren"
   },
   "fr": {
     "html_lang": "fr",
@@ -113,7 +122,10 @@
     "tooltip_com": "Broche 9 • DI_COM\nContact commun pour les entrées DI1..DI8.",
     "tooltip_gnd": "Broche 19 • DIO_GND (dupliquée sur la broche 10)\nMasse commune pour DIO et appareils externes.",
     "tooltip_vdc": "Broche 20 • VDC externe\nAlimentation DIO : +6..40V (NPN) ou +6..48V (PNP).",
-    "tooltip_nc": "Broche {pin} • NC\nContact de service sans canal DI/DO utilisateur."
+    "tooltip_nc": "Broche {pin} • NC\nContact de service sans canal DI/DO utilisateur.",
+    "runtime_probe_log_title": "Journal de sondage DLL Windows",
+    "runtime_probe_log_close": "Fermer le journal",
+    "runtime_probe_log_close_demo": "Lire le journal et continuer en mode démo"
   },
   "ja": {
     "html_lang": "ja",
@@ -142,7 +154,10 @@
     "tooltip_com": "ピン 9 • DI_COM\nDI1..DI8 入力の共通端子。",
     "tooltip_gnd": "ピン 19 • DIO_GND（ピン 10 に重複）\nDIO と外部機器の共通 GND。",
     "tooltip_vdc": "ピン 20 • 外部 VDC\nDIO 電源: 外部 +6..40V (NPN) または +6..48V (PNP)。",
-    "tooltip_nc": "ピン {pin} • NC\nユーザー DI/DO チャンネルのないサービス端子。"
+    "tooltip_nc": "ピン {pin} • NC\nユーザー DI/DO チャンネルのないサービス端子。",
+    "runtime_probe_log_title": "Windows DLL 検証ログ",
+    "runtime_probe_log_close": "ログを閉じる",
+    "runtime_probe_log_close_demo": "ログを読んでデモモードで続行"
   },
   "uk": {
     "html_lang": "uk",
@@ -171,6 +186,9 @@
     "tooltip_com": "Пін 9 • DI_COM\nСпільний контакт входів DI1..DI8.",
     "tooltip_gnd": "Пін 19 • DIO_GND (дубльований на піні 10)\nСпільний GND для DIO і зовнішніх пристроїв.",
     "tooltip_vdc": "Пін 20 • External VDC\nЖивлення DIO: зовнішній +6..40V (NPN) або +6..48V (PNP).",
-    "tooltip_nc": "Пін {pin} • NC\nСлужбовий контакт без користувацького DI/DO каналу."
+    "tooltip_nc": "Пін {pin} • NC\nСлужбовий контакт без користувацького DI/DO каналу.",
+    "runtime_probe_log_title": "Лог перевірки Windows DLL",
+    "runtime_probe_log_close": "Закрити лог",
+    "runtime_probe_log_close_demo": "Прочитати лог і продовжити в демо-режимі"
   }
 }

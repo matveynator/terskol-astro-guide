@@ -134,6 +134,46 @@
       color: #93c5fd;
     }
     .channel-card { border: 1px solid var(--card-border); border-radius: 10px; padding: 5px; display: flex; flex-direction: column; gap: 4px; background: rgba(9, 14, 28, var(--ui-alpha)); }
+    .runtime-log-panel {
+      border: 1px solid #2c3a57;
+      border-radius: 10px;
+      background: rgba(7, 12, 24, 0.94);
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .runtime-log-panel.hidden {
+      display: none;
+    }
+    .runtime-log-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #c8d3ec;
+      font-weight: 700;
+    }
+    .runtime-log-content {
+      margin: 0;
+      white-space: pre-wrap;
+      font-size: 12px;
+      color: #dbe7ff;
+      font-family: "Segoe UI", "Roboto Mono", monospace;
+      line-height: 1.4;
+    }
+    .runtime-log-close {
+      height: 28px;
+      min-width: 190px;
+      background: rgba(37, 99, 235, 0.95);
+      color: #eaf2ff;
+      border: 1px solid #1d4ed8;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
     .io-buttons { display: flex; gap: 6px; }
     button { border: 1px solid transparent; border-radius: 8px; height: clamp(24px, 2vw, 32px); font-size: clamp(11px, 0.9vw, 13px); color: white; cursor: pointer; background: rgba(51, 65, 85, var(--ui-alpha)); }
     .button-on, .button-off { flex: 1; }
@@ -358,6 +398,13 @@
 <div id="viewport-fit">
 <main id="application-root">
   <p id="error-text"></p>
+  <section id="runtime-log-panel" class="runtime-log-panel hidden">
+    <div class="runtime-log-header">
+      <span id="runtime-log-title">Windows DLL probe log</span>
+      <button id="runtime-log-close" class="runtime-log-close" type="button">Continue in demo mode</button>
+    </div>
+    <p id="runtime-log-content" class="runtime-log-content"></p>
+  </section>
 
   <section class="layout">
     <article class="panel">
@@ -405,6 +452,8 @@
     reverseToggleProcessing: false,
     websocketConnected: false,
     runtimeMessage: "",
+    runtimeIsDemoMode: false,
+    runtimeLogDismissed: false,
     outputControlInFlightByChannel: {},
     outputLastAppliedAtByChannel: {},
     outputIndicatorRefreshTimerByChannel: {},
@@ -423,6 +472,10 @@
   const portIndicatorGridElement = document.getElementById("port-indicator-grid");
   const outputGridElement = document.getElementById("output-grid");
   const errorTextElement = document.getElementById("error-text");
+  const runtimeLogPanelElement = document.getElementById("runtime-log-panel");
+  const runtimeLogTitleElement = document.getElementById("runtime-log-title");
+  const runtimeLogContentElement = document.getElementById("runtime-log-content");
+  const runtimeLogCloseElement = document.getElementById("runtime-log-close");
   const documentTitleElement = document.getElementById("document-title");
   const panelPortsTitleElement = document.getElementById("panel-ports-title");
   const panelPortsSubtitleElement = document.getElementById("panel-ports-subtitle");
@@ -504,6 +557,10 @@
     clickEvent.preventDefault();
     openRepositoryInExternalBrowser();
   });
+  runtimeLogCloseElement.addEventListener("click", function handleRuntimeLogCloseClick() {
+    applicationModel.runtimeLogDismissed = true;
+    renderFromModel();
+  });
 
   window.addEventListener("resize", updateApplicationScale);
 
@@ -515,10 +572,26 @@
     } else {
       errorTextElement.textContent = applicationModel.errorText;
     }
+    renderRuntimeLogPanel();
     renderPortIndicatorTable();
     renderInputs();
     renderOutputs();
     updateApplicationScale();
+  }
+
+  function renderRuntimeLogPanel() {
+    const shouldShowRuntimeLog = applicationModel.runtimeMessage !== "" && !applicationModel.runtimeLogDismissed;
+    if (!shouldShowRuntimeLog) {
+      runtimeLogPanelElement.classList.add("hidden");
+      return;
+    }
+
+    runtimeLogPanelElement.classList.remove("hidden");
+    runtimeLogContentElement.textContent = applicationModel.runtimeMessage;
+    runtimeLogTitleElement.textContent = t("runtime_probe_log_title");
+    runtimeLogCloseElement.textContent = applicationModel.runtimeIsDemoMode
+      ? t("runtime_probe_log_close_demo")
+      : t("runtime_probe_log_close");
   }
 
   function renderPortIndicatorTable() {
@@ -1079,6 +1152,7 @@
     applicationModel.inputsByChannel = nextInputsByChannel;
     applicationModel.outputsByChannel = nextOutputsByChannel;
     applicationModel.runtimeMessage = resolveRuntimeMessage(serverState.runtime);
+    applicationModel.runtimeIsDemoMode = Boolean(serverState.runtime && serverState.runtime.test_mode);
     syncTimerDefaultsWithOutputs(nextOutputsByChannel);
     clearEndedCountdowns(nextOutputsByChannel);
     applicationModel.errorText = "";
