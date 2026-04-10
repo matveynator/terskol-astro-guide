@@ -169,7 +169,7 @@ func main() {
 		runtimeMode = gpio.RuntimeMode{
 			InputSimulation:  true,
 			OutputSimulation: true,
-			DriverProbeLog:   err.Error(),
+			DriverProbeLog:   gpio.ProbeLogFromError(err),
 		}
 	}
 	defer func() {

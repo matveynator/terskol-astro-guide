@@ -1,6 +1,9 @@
 package gpio
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 const (
 	InputCount  = 8
@@ -26,6 +29,22 @@ type Config struct {
 }
 
 type SimulationAdapter struct{}
+
+type probeLogCarrier interface {
+	ProbeLog() string
+}
+
+func ProbeLogFromError(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	var carrier probeLogCarrier
+	if errors.As(err, &carrier) {
+		return carrier.ProbeLog()
+	}
+	return err.Error()
+}
 
 func (SimulationAdapter) ReadInput(channel int) (bool, error) {
 	if channel < 1 || channel > InputCount {
