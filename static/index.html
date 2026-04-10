@@ -699,12 +699,12 @@
       return "";
     }
 
-    if (runtimeState.message_key) {
-      return t(runtimeState.message_key);
-    }
-
     if (runtimeState.message) {
       return runtimeState.message;
+    }
+
+    if (runtimeState.message_key) {
+      return t(runtimeState.message_key);
     }
 
     return "";

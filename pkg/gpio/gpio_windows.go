@@ -58,16 +58,14 @@ func Open(config Config) (Adapter, RuntimeMode, error) {
 
 func openWindowsAdapter() (*windowsAdapter, RuntimeMode, error) {
 	searchOrder := windowsDLLSearchOrder()
-	driverProbeEvents := make([]string, 0, len(searchOrder)*3)
+	driverProbeEvents := make([]string, 0, len(searchOrder)*7)
 	for _, dllName := range searchOrder {
-		driverProbeEvents = append(driverProbeEvents, fmt.Sprintf("Try DLL: %s", dllName))
-		adapter, err := tryOpenWindowsAdapter(dllName)
+		adapter, dllProbeEvents, err := tryOpenWindowsAdapter(dllName)
+		driverProbeEvents = append(driverProbeEvents, dllProbeEvents...)
 		if err != nil {
-			driverProbeEvents = append(driverProbeEvents, fmt.Sprintf("  FAIL: %v", err))
 			continue
 		}
 
-		driverProbeEvents = append(driverProbeEvents, fmt.Sprintf("  OK: loaded %s", filepath.Base(dllName)))
 		driverProbeEvents = append(driverProbeEvents, fmt.Sprintf("GPIO ports are available. Active DLL: %s", filepath.Base(dllName)))
 		driverProbeEvents = append(driverProbeEvents, "Stop probing next DLL files.")
 		return adapter, RuntimeMode{
@@ -76,10 +74,7 @@ func openWindowsAdapter() (*windowsAdapter, RuntimeMode, error) {
 		}, nil
 	}
 
-	return nil, RuntimeMode{}, fmt.Errorf(
-		"initialize Vecow GPIO failed: none of DLLs can be used (%s)",
-		strings.Join(searchOrder, ", "),
-	)
+	return nil, RuntimeMode{}, fmt.Errorf("initialize Vecow GPIO failed:\n%s", strings.Join(driverProbeEvents, "\n"))
 }
 
 func windowsDLLSearchOrder() []string {
@@ -99,11 +94,16 @@ func windowsDLLSearchOrder() []string {
 	return searchOrder
 }
 
-func tryOpenWindowsAdapter(dllName string) (*windowsAdapter, error) {
+func tryOpenWindowsAdapter(dllName string) (*windowsAdapter, []string, error) {
+	dllPathForLog := resolveDLLPathForLog(dllName)
+	probeEvents := []string{fmt.Sprintf("Try DLL: %s", dllPathForLog)}
+
 	dll := windows.NewLazyDLL(dllName)
 	if err := dll.Load(); err != nil {
-		return nil, fmt.Errorf("load %s: %w", dllName, err)
+		probeEvents = append(probeEvents, fmt.Sprintf("  Load DLL: FAIL (%v)", err))
+		return nil, probeEvents, fmt.Errorf("load %s: %w", dllName, err)
 	}
+	probeEvents = append(probeEvents, "  Load DLL: OK")
 
 	adapter := &windowsAdapter{
 		dllName:     dllName,
@@ -115,43 +115,84 @@ func tryOpenWindowsAdapter(dllName string) (*windowsAdapter, error) {
 	}
 
 	if err := adapter.procInitial.Find(); err != nil {
-		_ = releaseLazyDLL(adapter.dll)
-		return nil, fmt.Errorf("resolve Initial in %s: %w", dllName, err)
+		probeEvents = append(probeEvents, fmt.Sprintf("  Resolve Initial: FAIL (%v)", err))
+		logDLLReleaseResult(adapter.dll, &probeEvents)
+		return nil, probeEvents, fmt.Errorf("resolve Initial in %s: %w", dllName, err)
 	}
+	probeEvents = append(probeEvents, "  Resolve Initial: OK")
 	if err := adapter.procConfig.Find(); err != nil {
-		_ = releaseLazyDLL(adapter.dll)
-		return nil, fmt.Errorf("resolve SetGPIOConfig in %s: %w", dllName, err)
+		probeEvents = append(probeEvents, fmt.Sprintf("  Resolve SetGPIOConfig: FAIL (%v)", err))
+		logDLLReleaseResult(adapter.dll, &probeEvents)
+		return nil, probeEvents, fmt.Errorf("resolve SetGPIOConfig in %s: %w", dllName, err)
 	}
+	probeEvents = append(probeEvents, "  Resolve SetGPIOConfig: OK")
 	if err := adapter.procGetGPIO.Find(); err != nil {
-		_ = releaseLazyDLL(adapter.dll)
-		return nil, fmt.Errorf("resolve GetGPIO in %s: %w", dllName, err)
+		probeEvents = append(probeEvents, fmt.Sprintf("  Resolve GetGPIO: FAIL (%v)", err))
+		logDLLReleaseResult(adapter.dll, &probeEvents)
+		return nil, probeEvents, fmt.Errorf("resolve GetGPIO in %s: %w", dllName, err)
 	}
+	probeEvents = append(probeEvents, "  Resolve GetGPIO: OK")
 	if err := adapter.procSetGPIO.Find(); err != nil {
-		_ = releaseLazyDLL(adapter.dll)
-		return nil, fmt.Errorf("resolve SetGPIO in %s: %w", dllName, err)
+		probeEvents = append(probeEvents, fmt.Sprintf("  Resolve SetGPIO: FAIL (%v)", err))
+		logDLLReleaseResult(adapter.dll, &probeEvents)
+		return nil, probeEvents, fmt.Errorf("resolve SetGPIO in %s: %w", dllName, err)
 	}
+	probeEvents = append(probeEvents, "  Resolve SetGPIO: OK")
 
 	if err := adapter.callInitial(); err != nil {
-		_ = releaseLazyDLL(adapter.dll)
-		return nil, err
+		probeEvents = append(probeEvents, fmt.Sprintf("  Initial call: FAIL (%v)", err))
+		logDLLReleaseResult(adapter.dll, &probeEvents)
+		return nil, probeEvents, err
 	}
+	probeEvents = append(probeEvents, "  Initial call: OK")
 	if err := adapter.callSetGPIOConfig(vecowGPIOConfigMask); err != nil {
-		_ = releaseLazyDLL(adapter.dll)
-		return nil, err
+		probeEvents = append(probeEvents, fmt.Sprintf("  SetGPIOConfig call: FAIL (%v)", err))
+		logDLLReleaseResult(adapter.dll, &probeEvents)
+		return nil, probeEvents, err
 	}
+	probeEvents = append(probeEvents, "  SetGPIOConfig call: OK")
 	if err := adapter.callSetGPIO(0); err != nil {
-		_ = releaseLazyDLL(adapter.dll)
-		return nil, err
+		probeEvents = append(probeEvents, fmt.Sprintf("  SetGPIO call: FAIL (%v)", err))
+		logDLLReleaseResult(adapter.dll, &probeEvents)
+		return nil, probeEvents, err
 	}
+	probeEvents = append(probeEvents, "  SetGPIO call: OK")
 
 	var gpioState uint16
 	if err := adapter.callGetGPIO(&gpioState); err != nil {
-		_ = releaseLazyDLL(adapter.dll)
-		return nil, fmt.Errorf("GPIO ports unavailable in %s: %w", dllName, err)
+		probeEvents = append(probeEvents, fmt.Sprintf("  GPIO ports check: FAIL (%v)", err))
+		logDLLReleaseResult(adapter.dll, &probeEvents)
+		return nil, probeEvents, fmt.Errorf("GPIO ports unavailable in %s: %w", dllName, err)
 	}
+	probeEvents = append(probeEvents, fmt.Sprintf("  GPIO ports check: OK (state=0x%04X)", gpioState))
+	probeEvents = append(probeEvents, "  Keep DLL loaded for runtime mode.")
 
 	adapter.outputMask.Store(0)
-	return adapter, nil
+	return adapter, probeEvents, nil
+}
+
+func resolveDLLPathForLog(dllName string) string {
+	if filepath.IsAbs(dllName) {
+		return dllName
+	}
+
+	if strings.ContainsRune(dllName, os.PathSeparator) {
+		absolutePath, err := filepath.Abs(dllName)
+		if err != nil {
+			return dllName
+		}
+		return absolutePath
+	}
+
+	return fmt.Sprintf("PATH lookup: %s", dllName)
+}
+
+func logDLLReleaseResult(dll *windows.LazyDLL, probeEvents *[]string) {
+	if err := releaseLazyDLL(dll); err != nil {
+		*probeEvents = append(*probeEvents, fmt.Sprintf("  Unload DLL: FAIL (%v)", err))
+		return
+	}
+	*probeEvents = append(*probeEvents, "  Unload DLL: OK")
 }
 
 func (adapter *windowsAdapter) ReadInput(channel int) (bool, error) {
