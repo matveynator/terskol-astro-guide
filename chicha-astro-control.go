@@ -19,7 +19,6 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -152,7 +151,7 @@ func main() {
 		inputTemplate:  resolveIOPathTemplate(*inputPathTemplateFlag, gpio.DefaultInputTemplate()),
 		outputTemplate: resolveIOPathTemplate(*outputPathTemplateFlag, gpio.DefaultOutputTemplate()),
 	}
-	cleanupWindowsDriverDirectory, err := prepareWindowsDriverDirectory()
+	cleanupWindowsDriverDirectory, err := gpio.PrepareWindowsDriverDirectory(staticFiles)
 	if err != nil {
 		log.Fatalf("startup: windows driver prepare failed: %v", err)
 	}
@@ -239,57 +238,6 @@ func resolveIOPathTemplate(explicitTemplate string, fallbackTemplate string) str
 
 	log.Printf("dio: using template=%s", trimmedExplicitTemplate)
 	return trimmedExplicitTemplate
-}
-
-func prepareWindowsDriverDirectory() (func(), error) {
-	if runtime.GOOS != "windows" {
-		return func() {}, nil
-	}
-
-	tempDriverDirectory, err := os.MkdirTemp("", "chicha-gpio-driver-*")
-	if err != nil {
-		return nil, fmt.Errorf("create windows driver temp directory: %w", err)
-	}
-
-	driverFileNames := []string{
-		"drv.dll",
-		"WinRing0x64.dll",
-		"OpenHardwareMonitorLib.dll",
-		"drv64.sys",
-		"Vecow.dll",
-	}
-	for _, driverFileName := range driverFileNames {
-		embeddedPath := path.Join("static", "driver", driverFileName)
-		driverFileBytes, readErr := fs.ReadFile(staticFiles, embeddedPath)
-		if readErr != nil {
-			_ = os.RemoveAll(tempDriverDirectory)
-			return nil, fmt.Errorf("read embedded driver %s: %w", driverFileName, readErr)
-		}
-
-		destinationPath := filepath.Join(tempDriverDirectory, driverFileName)
-		if writeErr := os.WriteFile(destinationPath, driverFileBytes, 0o644); writeErr != nil {
-			_ = os.RemoveAll(tempDriverDirectory)
-			return nil, fmt.Errorf("write embedded driver %s: %w", driverFileName, writeErr)
-		}
-	}
-
-	if setEnvErr := os.Setenv("CHICHA_GPIO_WINDOWS_DRIVER_DIR", tempDriverDirectory); setEnvErr != nil {
-		_ = os.RemoveAll(tempDriverDirectory)
-		return nil, fmt.Errorf("set CHICHA_GPIO_WINDOWS_DRIVER_DIR: %w", setEnvErr)
-	}
-
-	currentPath := os.Getenv("PATH")
-	pathListSeparator := string(os.PathListSeparator)
-	if currentPath == "" {
-		_ = os.Setenv("PATH", tempDriverDirectory)
-	} else {
-		_ = os.Setenv("PATH", strings.Join([]string{tempDriverDirectory, currentPath}, pathListSeparator))
-	}
-
-	cleanup := func() {
-		_ = os.RemoveAll(tempDriverDirectory)
-	}
-	return cleanup, nil
 }
 
 func listenOnFirstAvailablePort(startPort int) (net.Listener, string) {
