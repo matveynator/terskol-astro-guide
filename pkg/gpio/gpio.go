@@ -10,6 +10,8 @@ const (
 type RuntimeMode struct {
 	InputSimulation  bool
 	OutputSimulation bool
+	ActiveDriver     string
+	DriverProbeLog   string
 }
 
 type Adapter interface {
