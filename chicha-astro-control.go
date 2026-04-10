@@ -264,8 +264,31 @@ func configureApplicationLogging() {
 		return
 	}
 
-	log.SetOutput(io.MultiWriter(os.Stderr, logFileHandle))
+	log.SetOutput(buildLogOutputWriter(logFileHandle))
 	log.Printf("startup: logging to %s", logFilePath)
+}
+
+func buildLogOutputWriter(logFileHandle *os.File) io.Writer {
+	if logFileHandle == nil {
+		return os.Stderr
+	}
+
+	if stderrIsUnavailable() {
+		return logFileHandle
+	}
+
+	return io.MultiWriter(logFileHandle, os.Stderr)
+}
+
+func stderrIsUnavailable() bool {
+	if os.Stderr == nil {
+		return true
+	}
+
+	if _, statErr := os.Stderr.Stat(); statErr != nil {
+		return true
+	}
+	return false
 }
 
 func resolveLogFilePath() (string, error) {
