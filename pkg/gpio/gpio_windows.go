@@ -161,7 +161,7 @@ func (adapter *windowsAdapter) WriteOutput(channel int, high bool) error {
 		}
 
 		if err := adapter.callSetGPIO(uint16(nextMask)); err != nil {
-			adapter.outputMask.Store(currentMask)
+			_ = adapter.outputMask.CompareAndSwap(nextMask, currentMask)
 			return err
 		}
 		return nil
