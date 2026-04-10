@@ -5,6 +5,7 @@ package gpio
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"unsafe"
@@ -19,9 +20,11 @@ const (
 )
 
 var vecowDLLCandidates = []string{
-	"ECX1K.dll",
-	"Vecow.dll",
 	"drv.dll",
+	"WinRing0x64.dll",
+	"OpenHardwareMonitorLib.dll",
+	"Vecow.dll",
+	"ECX1K.dll",
 }
 
 type windowsAdapter struct {
@@ -46,36 +49,44 @@ func DefaultOutputTemplate() string {
 func Open(config Config) (Adapter, RuntimeMode, error) {
 	_ = config
 
-	adapter, err := openWindowsAdapter()
+	adapter, mode, err := openWindowsAdapter()
 	if err != nil {
 		return nil, RuntimeMode{}, err
 	}
-	return adapter, RuntimeMode{}, nil
+	return adapter, mode, nil
 }
 
-func openWindowsAdapter() (*windowsAdapter, error) {
-	for _, dllName := range windowsDLLSearchOrder() {
+func openWindowsAdapter() (*windowsAdapter, RuntimeMode, error) {
+	searchOrder := windowsDLLSearchOrder()
+	attemptErrors := make([]string, 0, len(searchOrder))
+	for _, dllName := range searchOrder {
 		adapter, err := tryOpenWindowsAdapter(dllName)
 		if err == nil {
-			return adapter, nil
+			return adapter, RuntimeMode{ActiveDriver: filepath.Base(dllName), DriverProbeLog: strings.Join(attemptErrors, "; ")}, nil
 		}
+		attemptErrors = append(attemptErrors, fmt.Sprintf("%s: %v", filepath.Base(dllName), err))
 	}
 
-	return nil, fmt.Errorf(
+	return nil, RuntimeMode{}, fmt.Errorf(
 		"initialize Vecow GPIO failed: none of DLLs can be used (%s)",
-		strings.Join(windowsDLLSearchOrder(), ", "),
+		strings.Join(searchOrder, ", "),
 	)
 }
 
 func windowsDLLSearchOrder() []string {
+	driverDir := strings.TrimSpace(os.Getenv("CHICHA_GPIO_WINDOWS_DRIVER_DIR"))
 	customDLL := strings.TrimSpace(os.Getenv("CHICHA_GPIO_WINDOWS_DLL"))
-	if customDLL == "" {
-		return vecowDLLCandidates
-	}
 
-	searchOrder := make([]string, 0, len(vecowDLLCandidates)+1)
-	searchOrder = append(searchOrder, customDLL)
-	searchOrder = append(searchOrder, vecowDLLCandidates...)
+	searchOrder := make([]string, 0, len(vecowDLLCandidates)+2)
+	if customDLL != "" {
+		searchOrder = append(searchOrder, customDLL)
+	}
+	for _, dllName := range vecowDLLCandidates {
+		if driverDir != "" {
+			searchOrder = append(searchOrder, filepath.Join(driverDir, dllName))
+		}
+		searchOrder = append(searchOrder, dllName)
+	}
 	return searchOrder
 }
 

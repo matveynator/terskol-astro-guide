@@ -152,6 +152,12 @@ func main() {
 		inputTemplate:  resolveIOPathTemplate(*inputPathTemplateFlag, gpio.DefaultInputTemplate()),
 		outputTemplate: resolveIOPathTemplate(*outputPathTemplateFlag, gpio.DefaultOutputTemplate()),
 	}
+	cleanupWindowsDriverDirectory, err := gpio.PrepareWindowsDriverDirectory(staticFiles)
+	if err != nil {
+		log.Fatalf("startup: windows driver prepare failed: %v", err)
+	}
+	defer cleanupWindowsDriverDirectory()
+
 	gpioAdapter, runtimeMode, err := gpio.Open(gpio.Config{
 		InputTemplate:  resolvedIOPaths.inputTemplate,
 		OutputTemplate: resolvedIOPaths.outputTemplate,
@@ -170,6 +176,9 @@ func main() {
 	runtimeStateData := runtimeState{}
 	if runtimeMode.InputSimulation || runtimeMode.OutputSimulation {
 		runtimeStateData = runtimeState{TestMode: true, MessageKey: "runtime_demo_mode"}
+	}
+	if runtimeMode.ActiveDriver != "" {
+		runtimeStateData.Message = fmt.Sprintf("GPIO driver: %s", runtimeMode.ActiveDriver)
 	}
 
 	outputPWMController := startPWMController(gpioAdapter, defaultPWMFrequency, runtimeMode.OutputSimulation)
@@ -246,6 +255,12 @@ func listenOnFirstAvailablePort(startPort int) (net.Listener, string) {
 }
 
 func logRuntimeMode(mode gpio.RuntimeMode, resolvedIOPaths ioPaths) {
+	if mode.ActiveDriver != "" {
+		log.Printf("gpio: active windows driver=%s", mode.ActiveDriver)
+	}
+	if mode.DriverProbeLog != "" {
+		log.Printf("gpio: failed driver probes before success: %s", mode.DriverProbeLog)
+	}
 	if mode.InputSimulation {
 		log.Printf("gpio: inputs are unavailable, switch to simulation mode. template=%s", resolvedIOPaths.inputTemplate)
 	}
