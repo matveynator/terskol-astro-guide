@@ -458,6 +458,7 @@
     reverseToggleProcessing: false,
     websocketConnected: false,
     runtimeMessage: "",
+    runtimeHasDetailedLog: false,
     runtimeIsDemoMode: false,
     runtimeLogDismissed: false,
     outputControlInFlightByChannel: {},
@@ -580,7 +581,7 @@
   }
 
   function renderRuntimeLogPanel() {
-    const shouldShowRuntimeLog = applicationModel.runtimeMessage !== "" && !applicationModel.runtimeLogDismissed;
+    const shouldShowRuntimeLog = applicationModel.runtimeHasDetailedLog && applicationModel.runtimeMessage !== "" && !applicationModel.runtimeLogDismissed;
     if (!shouldShowRuntimeLog) {
       runtimeLogPanelElement.classList.add("hidden");
       return;
@@ -1151,6 +1152,7 @@
 
     applicationModel.inputsByChannel = nextInputsByChannel;
     applicationModel.outputsByChannel = nextOutputsByChannel;
+    applicationModel.runtimeHasDetailedLog = Boolean(serverState.runtime && serverState.runtime.message);
     applicationModel.runtimeMessage = resolveRuntimeMessage(serverState.runtime);
     applicationModel.runtimeIsDemoMode = Boolean(serverState.runtime && serverState.runtime.test_mode);
     syncTimerDefaultsWithOutputs(nextOutputsByChannel);
