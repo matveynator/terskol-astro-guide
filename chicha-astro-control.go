@@ -146,6 +146,7 @@ type stateReply struct {
 // =============================
 
 func main() {
+	configureApplicationLogging()
 	flag.Parse()
 
 	resolvedIOPaths := ioPaths{
@@ -163,7 +164,13 @@ func main() {
 		OutputTemplate: resolvedIOPaths.outputTemplate,
 	})
 	if err != nil {
-		log.Fatalf("startup: GPIO init failed: %v", err)
+		log.Printf("startup: GPIO init failed, continue in simulation mode: %v", err)
+		gpioAdapter = gpio.SimulationAdapter{}
+		runtimeMode = gpio.RuntimeMode{
+			InputSimulation:  true,
+			OutputSimulation: true,
+			DriverProbeLog:   err.Error(),
+		}
 	}
 	defer func() {
 		if closeErr := gpioAdapter.Close(); closeErr != nil {
@@ -236,6 +243,68 @@ func main() {
 	log.Printf("webview: window started")
 	window.Run()
 	log.Printf("shutdown: webview stopped")
+}
+
+func configureApplicationLogging() {
+	logFilePath, pathErr := resolveLogFilePath()
+	if pathErr != nil {
+		log.Printf("startup: resolve log file path failed: %v", pathErr)
+		return
+	}
+
+	logDirectory := filepath.Dir(logFilePath)
+	if mkdirErr := os.MkdirAll(logDirectory, 0o755); mkdirErr != nil {
+		log.Printf("startup: create log directory failed: %v", mkdirErr)
+		return
+	}
+
+	logFileHandle, openErr := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if openErr != nil {
+		log.Printf("startup: open log file failed: %v", openErr)
+		return
+	}
+
+	log.SetOutput(buildLogOutputWriter(logFileHandle))
+	log.Printf("startup: logging to %s", logFilePath)
+}
+
+func buildLogOutputWriter(logFileHandle *os.File) io.Writer {
+	if logFileHandle == nil {
+		return os.Stderr
+	}
+
+	if stderrIsUnavailable() {
+		return logFileHandle
+	}
+
+	return io.MultiWriter(logFileHandle, os.Stderr)
+}
+
+func stderrIsUnavailable() bool {
+	if os.Stderr == nil {
+		return true
+	}
+
+	if _, statErr := os.Stderr.Stat(); statErr != nil {
+		return true
+	}
+	return false
+}
+
+func resolveLogFilePath() (string, error) {
+	if runtime.GOOS == "windows" {
+		localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
+		if localAppData == "" {
+			return "", fmt.Errorf("LOCALAPPDATA is empty")
+		}
+		return filepath.Join(localAppData, "chicha-astro-control", "logs", "application.log"), nil
+	}
+
+	userCacheDirectory, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user cache directory: %w", err)
+	}
+	return filepath.Join(userCacheDirectory, "chicha-astro-control", "application.log"), nil
 }
 
 func resolveIOPathTemplate(explicitTemplate string, fallbackTemplate string) string {

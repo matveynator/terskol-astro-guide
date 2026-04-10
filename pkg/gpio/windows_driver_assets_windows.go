@@ -12,6 +12,11 @@ import (
 )
 
 func PrepareWindowsDriverDirectory(embeddedFiles fs.FS) (func(), error) {
+	existingDriverDirectory := strings.TrimSpace(os.Getenv("CHICHA_GPIO_WINDOWS_DRIVER_DIR"))
+	if existingDriverDirectory != "" {
+		return func() {}, nil
+	}
+
 	tempDriverDirectory, err := os.MkdirTemp("", "chicha-gpio-driver-*")
 	if err != nil {
 		return nil, fmt.Errorf("create windows driver temp directory: %w", err)
@@ -33,7 +38,7 @@ func PrepareWindowsDriverDirectory(embeddedFiles fs.FS) (func(), error) {
 		}
 
 		destinationPath := filepath.Join(tempDriverDirectory, driverFileName)
-		if writeErr := os.WriteFile(destinationPath, driverFileBytes, 0o644); writeErr != nil {
+		if writeErr := os.WriteFile(destinationPath, driverFileBytes, 0o755); writeErr != nil {
 			_ = os.RemoveAll(tempDriverDirectory)
 			return nil, fmt.Errorf("write embedded driver %s: %w", driverFileName, writeErr)
 		}
