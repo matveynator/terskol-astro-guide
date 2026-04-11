@@ -597,6 +597,17 @@ func runStateOwner(stateCommands <-chan stateCommand, gpioAdapter *hotSwapGPIOAd
 				continue
 			}
 
+			// Persist the accepted DLL override before mutating runtime state so
+			// process behavior never diverges from persisted settings.
+			if err := saveSettings(settingsFile, state, dllOverridePath); err != nil {
+				closeErr := nextAdapter.Close()
+				if closeErr != nil {
+					log.Printf("runtime: failed to close staged GPIO adapter after settings save error: %v", closeErr)
+				}
+				command.reply <- stateReply{state: cloneState(state), err: err}
+				continue
+			}
+
 			if swapErr := gpioAdapter.Swap(nextAdapter, nextRuntimeMode); swapErr != nil {
 				command.reply <- stateReply{state: cloneState(state), err: swapErr}
 				continue
@@ -604,10 +615,6 @@ func runStateOwner(stateCommands <-chan stateCommand, gpioAdapter *hotSwapGPIOAd
 			currentRuntimeMode = nextRuntimeMode
 			currentSettings.DLLOverridePath = dllOverridePath
 			state.Runtime = buildRuntimeStateForUI(currentRuntimeMode, currentSettings.DLLOverridePath)
-			if err := saveSettings(settingsFile, state, currentSettings.DLLOverridePath); err != nil {
-				command.reply <- stateReply{state: cloneState(state), err: err}
-				continue
-			}
 			refreshInputSignals(&state, gpioAdapter)
 			for _, configuredOutput := range state.Outputs {
 				outputPWMController.Apply(configuredOutput)
