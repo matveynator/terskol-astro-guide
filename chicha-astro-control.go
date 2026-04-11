@@ -592,19 +592,27 @@ func runStateOwner(stateCommands <-chan stateCommand, gpioAdapter *hotSwapGPIOAd
 				}
 				state.Runtime = buildRuntimeStateForUI(currentRuntimeMode, currentSettings.DLLOverridePath)
 				state.Runtime.MessageKey = "runtime_demo_mode"
-				state.Runtime.DLLOverridePath = dllOverridePath
 				command.reply <- stateReply{state: cloneState(state)}
 				continue
 			}
 
-			if swapErr := gpioAdapter.Swap(nextAdapter, nextRuntimeMode); swapErr != nil {
-				command.reply <- stateReply{state: cloneState(state), err: swapErr}
+			previousDLLOverridePath := currentSettings.DLLOverridePath
+			// Persist the accepted DLL override before mutating runtime and adapter state.
+			if err := saveSettings(settingsFile, state, dllOverridePath); err != nil {
+				command.reply <- stateReply{state: cloneState(state), err: err}
 				continue
 			}
 
-			// Persist the accepted DLL override before mutating in-memory runtime state.
-			if err := saveSettings(settingsFile, state, dllOverridePath); err != nil {
-				command.reply <- stateReply{state: cloneState(state), err: err}
+			if swapErr := gpioAdapter.Swap(nextAdapter, nextRuntimeMode); swapErr != nil {
+				rollbackErr := saveSettings(settingsFile, state, previousDLLOverridePath)
+				if rollbackErr != nil {
+					command.reply <- stateReply{
+						state: cloneState(state),
+						err:   fmt.Errorf("swap GPIO adapter failed: %w (rollback failed: %v)", swapErr, rollbackErr),
+					}
+					continue
+				}
+				command.reply <- stateReply{state: cloneState(state), err: swapErr}
 				continue
 			}
 
