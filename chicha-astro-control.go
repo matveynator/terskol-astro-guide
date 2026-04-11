@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"chicha-astro-control/pkg/gpio"
@@ -133,6 +134,11 @@ type pwmController struct {
 	channelCommands []chan pwmChannelCommand
 }
 
+type hotSwapGPIOAdapter struct {
+	currentAdapter atomic.Value
+	inputSimulated atomic.Bool
+}
+
 type pwmChannelCommand struct {
 	power string
 	pwm   int
@@ -181,8 +187,9 @@ func main() {
 			DriverProbeLog:   gpio.ProbeLogFromError(err),
 		}
 	}
+	hotSwapAdapter := newHotSwapGPIOAdapter(gpioAdapter, runtimeMode)
 	defer func() {
-		if closeErr := gpioAdapter.Close(); closeErr != nil {
+		if closeErr := hotSwapAdapter.Close(); closeErr != nil {
 			log.Printf("shutdown: GPIO close failed: %v", closeErr)
 		}
 	}()
@@ -191,14 +198,15 @@ func main() {
 	stateCommands := make(chan stateCommand)
 	runtimeStateData := buildRuntimeStateForUI(runtimeMode, loadedSettings.DLLOverridePath)
 
-	outputPWMController := startPWMController(gpioAdapter, defaultPWMFrequency, runtimeMode.OutputSimulation)
+	outputPWMController := startPWMController(hotSwapAdapter, defaultPWMFrequency)
 	go runStateOwner(
 		stateCommands,
-		gpioAdapter,
+		hotSwapAdapter,
 		settingsFile,
 		loadedSettings,
 		outputPWMController,
 		runtimeMode,
+		resolvedIOPaths,
 		runtimeStateData,
 	)
 
@@ -357,6 +365,50 @@ func buildRuntimeStateForUI(mode gpio.RuntimeMode, dllOverridePath string) runti
 	return assembledState
 }
 
+func newHotSwapGPIOAdapter(initialAdapter gpio.Adapter, initialMode gpio.RuntimeMode) *hotSwapGPIOAdapter {
+	adapter := &hotSwapGPIOAdapter{}
+	adapter.currentAdapter.Store(initialAdapter)
+	adapter.inputSimulated.Store(initialMode.InputSimulation)
+	return adapter
+}
+
+func (adapter *hotSwapGPIOAdapter) ReadInput(channel int) (bool, error) {
+	if adapter.inputSimulated.Load() {
+		return false, nil
+	}
+	activeAdapter := adapter.currentAdapter.Load()
+	if activeAdapter == nil {
+		return false, errors.New("gpio adapter is not initialized")
+	}
+	return activeAdapter.(gpio.Adapter).ReadInput(channel)
+}
+
+func (adapter *hotSwapGPIOAdapter) WriteOutput(channel int, high bool) error {
+	activeAdapter := adapter.currentAdapter.Load()
+	if activeAdapter == nil {
+		return errors.New("gpio adapter is not initialized")
+	}
+	return activeAdapter.(gpio.Adapter).WriteOutput(channel, high)
+}
+
+func (adapter *hotSwapGPIOAdapter) Close() error {
+	activeAdapter := adapter.currentAdapter.Load()
+	if activeAdapter == nil {
+		return nil
+	}
+	return activeAdapter.(gpio.Adapter).Close()
+}
+
+func (adapter *hotSwapGPIOAdapter) Swap(nextAdapter gpio.Adapter, nextMode gpio.RuntimeMode) error {
+	previousAdapter := adapter.currentAdapter.Load()
+	adapter.currentAdapter.Store(nextAdapter)
+	adapter.inputSimulated.Store(nextMode.InputSimulation)
+	if previousAdapter == nil {
+		return nil
+	}
+	return previousAdapter.(gpio.Adapter).Close()
+}
+
 func detectIORuntimeMode(resolvedIOPaths ioPaths) ioRuntimeMode {
 	mode := ioRuntimeMode{}
 	if firstMissingChannelPath(resolvedIOPaths.inputTemplate, inputCount) != "" {
@@ -463,23 +515,20 @@ func openURLInExternalBrowser(repositoryURL string) error {
 // State owner goroutine.
 // =============================
 
-func runStateOwner(stateCommands <-chan stateCommand, gpioAdapter gpio.Adapter, settingsFile string, loadedSettings persistedSettings, outputPWMController *pwmController, runtimeMode gpio.RuntimeMode, runtimeStateData runtimeState) {
+func runStateOwner(stateCommands <-chan stateCommand, gpioAdapter *hotSwapGPIOAdapter, settingsFile string, loadedSettings persistedSettings, outputPWMController *pwmController, runtimeMode gpio.RuntimeMode, resolvedIOPaths ioPaths, runtimeStateData runtimeState) {
 	currentSettings := loadedSettings
 	state := buildInitialState(loadedSettings.Labels, indexOutputsByChannel(loadedSettings.Outputs))
 	state.Runtime = runtimeStateData
+	currentRuntimeMode := runtimeMode
 	for _, configuredOutput := range state.Outputs {
 		outputPWMController.Apply(configuredOutput)
 	}
-	if !runtimeMode.InputSimulation {
-		refreshInputSignals(&state, gpioAdapter)
-	}
+	refreshInputSignals(&state, gpioAdapter)
 
 	for command := range stateCommands {
 		switch command.kind {
 		case "get":
-			if !runtimeMode.InputSimulation {
-				refreshInputSignals(&state, gpioAdapter)
-			}
+			refreshInputSignals(&state, gpioAdapter)
 			command.reply <- stateReply{state: cloneState(state)}
 
 		case "set_output_power":
@@ -529,11 +578,39 @@ func runStateOwner(stateCommands <-chan stateCommand, gpioAdapter gpio.Adapter, 
 				command.reply <- stateReply{state: cloneState(state), err: err}
 				continue
 			}
+
+			nextAdapter, nextRuntimeMode, openErr := gpio.Open(gpio.Config{
+				InputTemplate:  resolvedIOPaths.inputTemplate,
+				OutputTemplate: resolvedIOPaths.outputTemplate,
+				WindowsDLLPath: dllOverridePath,
+			})
+			if openErr != nil {
+				currentRuntimeMode = gpio.RuntimeMode{
+					InputSimulation:  true,
+					OutputSimulation: true,
+					DriverProbeLog:   gpio.ProbeLogFromError(openErr),
+				}
+				state.Runtime = buildRuntimeStateForUI(currentRuntimeMode, currentSettings.DLLOverridePath)
+				state.Runtime.MessageKey = "runtime_demo_mode"
+				state.Runtime.DLLOverridePath = dllOverridePath
+				command.reply <- stateReply{state: cloneState(state)}
+				continue
+			}
+
+			if swapErr := gpioAdapter.Swap(nextAdapter, nextRuntimeMode); swapErr != nil {
+				command.reply <- stateReply{state: cloneState(state), err: swapErr}
+				continue
+			}
+			currentRuntimeMode = nextRuntimeMode
 			currentSettings.DLLOverridePath = dllOverridePath
-			state.Runtime.DLLOverridePath = dllOverridePath
+			state.Runtime = buildRuntimeStateForUI(currentRuntimeMode, currentSettings.DLLOverridePath)
 			if err := saveSettings(settingsFile, state, currentSettings.DLLOverridePath); err != nil {
 				command.reply <- stateReply{state: cloneState(state), err: err}
 				continue
+			}
+			refreshInputSignals(&state, gpioAdapter)
+			for _, configuredOutput := range state.Outputs {
+				outputPWMController.Apply(configuredOutput)
 			}
 			command.reply <- stateReply{state: cloneState(state)}
 
@@ -731,7 +808,7 @@ func parseInputSignal(rawInputSignal string) string {
 	}
 }
 
-func startPWMController(gpioAdapter gpio.Adapter, pwmFrequencyHz float64, simulationMode bool) *pwmController {
+func startPWMController(gpioAdapter gpio.Adapter, pwmFrequencyHz float64) *pwmController {
 	if pwmFrequencyHz <= 0 {
 		pwmFrequencyHz = 100
 	}
@@ -743,7 +820,7 @@ func startPWMController(gpioAdapter gpio.Adapter, pwmFrequencyHz float64, simula
 	for channel := 1; channel <= outputCount; channel++ {
 		channelCommandQueue := make(chan pwmChannelCommand, 1)
 		controller.channelCommands[channel-1] = channelCommandQueue
-		go runPWMChannelLoop(channel, gpioAdapter, pwmFrequencyHz, channelCommandQueue, simulationMode)
+		go runPWMChannelLoop(channel, gpioAdapter, pwmFrequencyHz, channelCommandQueue)
 	}
 
 	return controller
@@ -771,17 +848,10 @@ func (controller *pwmController) Apply(output outputState) {
 	}
 }
 
-func runPWMChannelLoop(channel int, gpioAdapter gpio.Adapter, pwmFrequencyHz float64, channelCommands <-chan pwmChannelCommand, simulationMode bool) {
+func runPWMChannelLoop(channel int, gpioAdapter gpio.Adapter, pwmFrequencyHz float64, channelCommands <-chan pwmChannelCommand) {
 	currentCommand := pwmChannelCommand{power: "off", pwm: 0}
 	pwmPeriod := time.Duration(float64(time.Second) / pwmFrequencyHz)
 	log.Printf("pwm: channel=%d frequency=%.2fHz", channel, pwmFrequencyHz)
-	if simulationMode {
-		log.Printf("pwm: channel=%d test mode enabled, GPIO writes are disabled", channel)
-		for {
-			currentCommand = <-channelCommands
-			_ = currentCommand
-		}
-	}
 
 	for {
 		if currentCommand.power != "on" || currentCommand.pwm <= 0 {

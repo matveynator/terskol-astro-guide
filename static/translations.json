@@ -31,8 +31,9 @@
     "runtime_probe_log_close": "Close log",
     "runtime_probe_log_close_demo": "Read log and continue in demo mode",
     "runtime_dll_override_placeholder": "Selected DLL override path",
-    "runtime_dll_override_apply": "Upload and save DLL",
-    "runtime_dll_override_saved": "DLL override saved. Restart the application to use this DLL first.",
+    "runtime_dll_override_choose": "Choose",
+    "runtime_dll_override_apply": "Load GPU drivers",
+    "runtime_dll_override_saved": "GPU driver check finished. See the log above.",
     "runtime_dll_override_error_missing_file": "Select a DLL file before upload."
   },
   "ru": {
@@ -67,8 +68,9 @@
     "runtime_probe_log_close": "Закрыть лог",
     "runtime_probe_log_close_demo": "Прочитать лог и запустить демо-режим",
     "runtime_dll_override_placeholder": "Путь к выбранной DLL",
-    "runtime_dll_override_apply": "Загрузить и сохранить DLL",
-    "runtime_dll_override_saved": "Путь к DLL сохранён. Перезапустите приложение, чтобы сначала использовать эту DLL.",
+    "runtime_dll_override_choose": "Выбрать",
+    "runtime_dll_override_apply": "Подгрузить драйверы GPU",
+    "runtime_dll_override_saved": "Проверка драйверов GPU завершена. Смотрите лог выше.",
     "runtime_dll_override_error_missing_file": "Перед загрузкой выберите DLL-файл."
   },
   "de": {
@@ -103,8 +105,9 @@
     "runtime_probe_log_close": "Protokoll schließen",
     "runtime_probe_log_close_demo": "Protokoll lesen und im Demo-Modus fortfahren",
     "runtime_dll_override_placeholder": "Selected DLL override path",
+    "runtime_dll_override_choose": "Choose",
     "runtime_dll_override_apply": "Upload and save DLL",
-    "runtime_dll_override_saved": "DLL override saved. Restart the application to use this DLL first.",
+    "runtime_dll_override_saved": "GPU driver check finished. See the log above.",
     "runtime_dll_override_error_missing_file": "Select a DLL file before upload."
   },
   "fr": {
@@ -139,8 +142,9 @@
     "runtime_probe_log_close": "Fermer le journal",
     "runtime_probe_log_close_demo": "Lire le journal et continuer en mode démo",
     "runtime_dll_override_placeholder": "Selected DLL override path",
+    "runtime_dll_override_choose": "Choose",
     "runtime_dll_override_apply": "Upload and save DLL",
-    "runtime_dll_override_saved": "DLL override saved. Restart the application to use this DLL first.",
+    "runtime_dll_override_saved": "GPU driver check finished. See the log above.",
     "runtime_dll_override_error_missing_file": "Select a DLL file before upload."
   },
   "ja": {
@@ -175,8 +179,9 @@
     "runtime_probe_log_close": "ログを閉じる",
     "runtime_probe_log_close_demo": "ログを読んでデモモードで続行",
     "runtime_dll_override_placeholder": "Selected DLL override path",
+    "runtime_dll_override_choose": "Choose",
     "runtime_dll_override_apply": "Upload and save DLL",
-    "runtime_dll_override_saved": "DLL override saved. Restart the application to use this DLL first.",
+    "runtime_dll_override_saved": "GPU driver check finished. See the log above.",
     "runtime_dll_override_error_missing_file": "Select a DLL file before upload."
   },
   "uk": {
@@ -211,8 +216,9 @@
     "runtime_probe_log_close": "Закрити лог",
     "runtime_probe_log_close_demo": "Прочитати лог і продовжити в демо-режимі",
     "runtime_dll_override_placeholder": "Selected DLL override path",
+    "runtime_dll_override_choose": "Choose",
     "runtime_dll_override_apply": "Upload and save DLL",
-    "runtime_dll_override_saved": "DLL override saved. Restart the application to use this DLL first.",
+    "runtime_dll_override_saved": "GPU driver check finished. See the log above.",
     "runtime_dll_override_error_missing_file": "Select a DLL file before upload."
   }
 }

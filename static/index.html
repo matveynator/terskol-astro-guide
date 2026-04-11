@@ -146,6 +146,18 @@
     .runtime-log-panel.hidden {
       display: none;
     }
+    .runtime-recovery-panel {
+      border: 1px solid #2c3a57;
+      border-radius: 10px;
+      background: rgba(7, 12, 24, 0.94);
+      padding: 8px;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .runtime-recovery-panel.visible {
+      display: flex;
+    }
     .runtime-log-header {
       display: flex;
       justify-content: space-between;
@@ -208,6 +220,12 @@
     .dll-override-actions {
       display: flex;
       gap: 6px;
+      align-items: center;
+    }
+    #dll-override-file-label {
+      font-size: 12px;
+      color: #c8d3ec;
+      min-width: 64px;
     }
     .io-buttons { display: flex; gap: 6px; }
     button { border: 1px solid transparent; border-radius: 8px; height: clamp(24px, 2vw, 32px); font-size: clamp(11px, 0.9vw, 13px); color: white; cursor: pointer; background: rgba(51, 65, 85, var(--ui-alpha)); }
@@ -439,13 +457,16 @@
       <button id="runtime-log-close" class="runtime-log-close" type="button">Continue in demo mode</button>
     </div>
     <p id="runtime-log-content" class="runtime-log-content"></p>
+  </section>
+  <section id="runtime-recovery-panel" class="runtime-recovery-panel">
     <section id="dll-override-panel" class="dll-override-panel">
       <div class="dll-override-row">
         <input id="dll-override-path" class="dll-override-path" type="text" readonly />
       </div>
       <div class="dll-override-actions">
+        <label id="dll-override-file-label" for="dll-override-file">Выбрать</label>
         <input id="dll-override-file" type="file" accept=".dll" />
-        <button id="dll-override-apply" type="button">Apply DLL override</button>
+        <button id="dll-override-apply" type="button">Подгрузить драйверы GPU</button>
       </div>
     </section>
   </section>
@@ -520,12 +541,14 @@
   const outputGridElement = document.getElementById("output-grid");
   const errorTextElement = document.getElementById("error-text");
   const runtimeLogPanelElement = document.getElementById("runtime-log-panel");
+  const runtimeRecoveryPanelElement = document.getElementById("runtime-recovery-panel");
   const runtimeLogTitleElement = document.getElementById("runtime-log-title");
   const runtimeLogContentElement = document.getElementById("runtime-log-content");
   const runtimeLogCloseElement = document.getElementById("runtime-log-close");
   const dllOverridePanelElement = document.getElementById("dll-override-panel");
   const dllOverridePathElement = document.getElementById("dll-override-path");
   const dllOverrideFileElement = document.getElementById("dll-override-file");
+  const dllOverrideFileLabelElement = document.getElementById("dll-override-file-label");
   const dllOverrideApplyElement = document.getElementById("dll-override-apply");
   const documentTitleElement = document.getElementById("document-title");
   const panelPortsTitleElement = document.getElementById("panel-ports-title");
@@ -645,18 +668,21 @@
     const shouldShowRuntimeLog = applicationModel.runtimeHasDetailedLog && applicationModel.runtimeMessage !== "" && !applicationModel.runtimeLogDismissed;
     if (!shouldShowRuntimeLog) {
       runtimeLogPanelElement.classList.add("hidden");
-      return;
+    } else {
+      runtimeLogPanelElement.classList.remove("hidden");
+      runtimeLogContentElement.textContent = applicationModel.runtimeMessage;
+      runtimeLogTitleElement.textContent = t("runtime_probe_log_title");
+      runtimeLogCloseElement.textContent = applicationModel.runtimeIsDemoMode
+        ? t("runtime_probe_log_close_demo")
+        : t("runtime_probe_log_close");
     }
 
-    runtimeLogPanelElement.classList.remove("hidden");
-    runtimeLogContentElement.textContent = applicationModel.runtimeMessage;
-    runtimeLogTitleElement.textContent = t("runtime_probe_log_title");
-    runtimeLogCloseElement.textContent = applicationModel.runtimeIsDemoMode
-      ? t("runtime_probe_log_close_demo")
-      : t("runtime_probe_log_close");
-    dllOverridePanelElement.style.display = applicationModel.runtimeIsDemoMode ? "flex" : "none";
+    const shouldShowRecoveryPanel = applicationModel.runtimeIsDemoMode && !shouldShowRuntimeLog;
+    runtimeRecoveryPanelElement.classList.toggle("visible", shouldShowRecoveryPanel);
+    dllOverridePanelElement.style.display = shouldShowRecoveryPanel ? "flex" : "none";
     dllOverridePathElement.placeholder = t("runtime_dll_override_placeholder");
     dllOverridePathElement.value = applicationModel.runtimeDLLSelectedFilePath || applicationModel.runtimeDLLOverridePath || "";
+    dllOverrideFileLabelElement.textContent = t("runtime_dll_override_choose");
     dllOverrideApplyElement.textContent = t("runtime_dll_override_apply");
   }
 
@@ -1215,10 +1241,14 @@
       nextOutputsByChannel[outputState.channel] = outputState;
     });
 
+    const previousRuntimeMessage = applicationModel.runtimeMessage;
     applicationModel.inputsByChannel = nextInputsByChannel;
     applicationModel.outputsByChannel = nextOutputsByChannel;
     applicationModel.runtimeHasDetailedLog = Boolean(serverState.runtime && serverState.runtime.message);
     applicationModel.runtimeMessage = resolveRuntimeMessage(serverState.runtime);
+    if (applicationModel.runtimeMessage !== previousRuntimeMessage) {
+      applicationModel.runtimeLogDismissed = false;
+    }
     applicationModel.runtimeIsDemoMode = Boolean(serverState.runtime && serverState.runtime.test_mode);
     applicationModel.runtimeDLLOverridePath = String(serverState.runtime && serverState.runtime.dll_override_path ? serverState.runtime.dll_override_path : "");
     syncTimerDefaultsWithOutputs(nextOutputsByChannel);
