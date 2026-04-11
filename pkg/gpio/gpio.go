@@ -26,6 +26,7 @@ type Adapter interface {
 type Config struct {
 	InputTemplate  string
 	OutputTemplate string
+	WindowsDLLPath string
 }
 
 type SimulationAdapter struct{}

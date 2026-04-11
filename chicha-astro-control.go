@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"chicha-astro-control/pkg/gpio"
@@ -95,9 +96,10 @@ type ioPaths struct {
 }
 
 type runtimeState struct {
-	TestMode   bool   `json:"test_mode"`
-	Message    string `json:"message"`
-	MessageKey string `json:"message_key"`
+	TestMode        bool   `json:"test_mode"`
+	Message         string `json:"message"`
+	MessageKey      string `json:"message_key"`
+	DLLOverridePath string `json:"dll_override_path"`
 }
 
 type savedOutputState struct {
@@ -113,8 +115,9 @@ type ioRuntimeMode struct {
 }
 
 type persistedSettings struct {
-	Labels  map[string]string  `json:"labels"`
-	Outputs []savedOutputState `json:"outputs"`
+	Labels          map[string]string  `json:"labels"`
+	Outputs         []savedOutputState `json:"outputs"`
+	DLLOverridePath string             `json:"dll_override_path"`
 }
 
 type stateCommand struct {
@@ -129,6 +132,11 @@ type stateCommand struct {
 
 type pwmController struct {
 	channelCommands []chan pwmChannelCommand
+}
+
+type hotSwapGPIOAdapter struct {
+	currentAdapter atomic.Value
+	inputSimulated atomic.Bool
 }
 
 type pwmChannelCommand struct {
@@ -153,6 +161,12 @@ func main() {
 		inputTemplate:  resolveIOPathTemplate(*inputPathTemplateFlag, gpio.DefaultInputTemplate()),
 		outputTemplate: resolveIOPathTemplate(*outputPathTemplateFlag, gpio.DefaultOutputTemplate()),
 	}
+	settingsFile, err := resolveSettingsFilePath(*settingsFileFlag)
+	if err != nil {
+		log.Fatalf("startup: settings path resolve failed: %v", err)
+	}
+	loadedSettings := loadSettings(settingsFile)
+
 	cleanupWindowsDriverDirectory, err := gpio.PrepareWindowsDriverDirectory(staticFiles)
 	if err != nil {
 		log.Fatalf("startup: windows driver prepare failed: %v", err)
@@ -162,6 +176,7 @@ func main() {
 	gpioAdapter, runtimeMode, err := gpio.Open(gpio.Config{
 		InputTemplate:  resolvedIOPaths.inputTemplate,
 		OutputTemplate: resolvedIOPaths.outputTemplate,
+		WindowsDLLPath: loadedSettings.DLLOverridePath,
 	})
 	if err != nil {
 		log.Printf("startup: GPIO init failed, continue in simulation mode: %v", err)
@@ -172,27 +187,26 @@ func main() {
 			DriverProbeLog:   gpio.ProbeLogFromError(err),
 		}
 	}
+	hotSwapAdapter := newHotSwapGPIOAdapter(gpioAdapter, runtimeMode)
 	defer func() {
-		if closeErr := gpioAdapter.Close(); closeErr != nil {
+		if closeErr := hotSwapAdapter.Close(); closeErr != nil {
 			log.Printf("shutdown: GPIO close failed: %v", closeErr)
 		}
 	}()
 	logRuntimeMode(runtimeMode, resolvedIOPaths)
 
 	stateCommands := make(chan stateCommand)
-	runtimeStateData := buildRuntimeStateForUI(runtimeMode)
+	runtimeStateData := buildRuntimeStateForUI(runtimeMode, loadedSettings.DLLOverridePath)
 
-	outputPWMController := startPWMController(gpioAdapter, defaultPWMFrequency, runtimeMode.OutputSimulation)
-	settingsFile, err := resolveSettingsFilePath(*settingsFileFlag)
-	if err != nil {
-		log.Fatalf("startup: settings path resolve failed: %v", err)
-	}
+	outputPWMController := startPWMController(hotSwapAdapter, defaultPWMFrequency)
 	go runStateOwner(
 		stateCommands,
-		gpioAdapter,
+		hotSwapAdapter,
 		settingsFile,
+		loadedSettings,
 		outputPWMController,
 		runtimeMode,
+		resolvedIOPaths,
 		runtimeStateData,
 	)
 
@@ -203,6 +217,7 @@ func main() {
 	http.HandleFunc("/api/output/pwm", handleSetOutputPWM(stateCommands))
 	http.HandleFunc("/api/label", handleSetLabel(stateCommands))
 	http.HandleFunc("/api/open/repository", handleOpenRepository)
+	http.HandleFunc("/api/runtime/dll-override", handleSetDLLOverride(stateCommands))
 	http.HandleFunc("/", handleRequest)
 
 	httpListener, address := listenOnFirstAvailablePort(defaultStartPort)
@@ -329,12 +344,13 @@ func logRuntimeMode(mode gpio.RuntimeMode, resolvedIOPaths ioPaths) {
 	}
 }
 
-func buildRuntimeStateForUI(mode gpio.RuntimeMode) runtimeState {
+func buildRuntimeStateForUI(mode gpio.RuntimeMode, dllOverridePath string) runtimeState {
 	assembledState := runtimeState{}
 	if mode.InputSimulation || mode.OutputSimulation {
 		assembledState.TestMode = true
 		assembledState.MessageKey = "runtime_demo_mode"
 	}
+	assembledState.DLLOverridePath = strings.TrimSpace(dllOverridePath)
 
 	probeMessageParts := make([]string, 0, 2)
 	if mode.DriverProbeLog != "" {
@@ -347,6 +363,50 @@ func buildRuntimeStateForUI(mode gpio.RuntimeMode) runtimeState {
 		assembledState.Message = strings.Join(probeMessageParts, "\n")
 	}
 	return assembledState
+}
+
+func newHotSwapGPIOAdapter(initialAdapter gpio.Adapter, initialMode gpio.RuntimeMode) *hotSwapGPIOAdapter {
+	adapter := &hotSwapGPIOAdapter{}
+	adapter.currentAdapter.Store(initialAdapter)
+	adapter.inputSimulated.Store(initialMode.InputSimulation)
+	return adapter
+}
+
+func (adapter *hotSwapGPIOAdapter) ReadInput(channel int) (bool, error) {
+	if adapter.inputSimulated.Load() {
+		return false, nil
+	}
+	activeAdapter := adapter.currentAdapter.Load()
+	if activeAdapter == nil {
+		return false, errors.New("gpio adapter is not initialized")
+	}
+	return activeAdapter.(gpio.Adapter).ReadInput(channel)
+}
+
+func (adapter *hotSwapGPIOAdapter) WriteOutput(channel int, high bool) error {
+	activeAdapter := adapter.currentAdapter.Load()
+	if activeAdapter == nil {
+		return errors.New("gpio adapter is not initialized")
+	}
+	return activeAdapter.(gpio.Adapter).WriteOutput(channel, high)
+}
+
+func (adapter *hotSwapGPIOAdapter) Close() error {
+	activeAdapter := adapter.currentAdapter.Load()
+	if activeAdapter == nil {
+		return nil
+	}
+	return activeAdapter.(gpio.Adapter).Close()
+}
+
+func (adapter *hotSwapGPIOAdapter) Swap(nextAdapter gpio.Adapter, nextMode gpio.RuntimeMode) error {
+	previousAdapter := adapter.currentAdapter.Load()
+	adapter.currentAdapter.Store(nextAdapter)
+	adapter.inputSimulated.Store(nextMode.InputSimulation)
+	if previousAdapter == nil {
+		return nil
+	}
+	return previousAdapter.(gpio.Adapter).Close()
 }
 
 func detectIORuntimeMode(resolvedIOPaths ioPaths) ioRuntimeMode {
@@ -455,23 +515,20 @@ func openURLInExternalBrowser(repositoryURL string) error {
 // State owner goroutine.
 // =============================
 
-func runStateOwner(stateCommands <-chan stateCommand, gpioAdapter gpio.Adapter, settingsFile string, outputPWMController *pwmController, runtimeMode gpio.RuntimeMode, runtimeStateData runtimeState) {
-	loadedSettings := loadSettings(settingsFile)
+func runStateOwner(stateCommands <-chan stateCommand, gpioAdapter *hotSwapGPIOAdapter, settingsFile string, loadedSettings persistedSettings, outputPWMController *pwmController, runtimeMode gpio.RuntimeMode, resolvedIOPaths ioPaths, runtimeStateData runtimeState) {
+	currentSettings := loadedSettings
 	state := buildInitialState(loadedSettings.Labels, indexOutputsByChannel(loadedSettings.Outputs))
 	state.Runtime = runtimeStateData
+	currentRuntimeMode := runtimeMode
 	for _, configuredOutput := range state.Outputs {
 		outputPWMController.Apply(configuredOutput)
 	}
-	if !runtimeMode.InputSimulation {
-		refreshInputSignals(&state, gpioAdapter)
-	}
+	refreshInputSignals(&state, gpioAdapter)
 
 	for command := range stateCommands {
 		switch command.kind {
 		case "get":
-			if !runtimeMode.InputSimulation {
-				refreshInputSignals(&state, gpioAdapter)
-			}
+			refreshInputSignals(&state, gpioAdapter)
 			command.reply <- stateReply{state: cloneState(state)}
 
 		case "set_output_power":
@@ -480,7 +537,7 @@ func runStateOwner(stateCommands <-chan stateCommand, gpioAdapter gpio.Adapter, 
 				command.reply <- stateReply{state: cloneState(state), err: err}
 				continue
 			}
-			if err := saveSettings(settingsFile, nextState); err != nil {
+			if err := saveSettings(settingsFile, nextState, currentSettings.DLLOverridePath); err != nil {
 				command.reply <- stateReply{state: cloneState(state), err: err}
 				continue
 			}
@@ -494,7 +551,7 @@ func runStateOwner(stateCommands <-chan stateCommand, gpioAdapter gpio.Adapter, 
 				command.reply <- stateReply{state: cloneState(state), err: err}
 				continue
 			}
-			if err := saveSettings(settingsFile, nextState); err != nil {
+			if err := saveSettings(settingsFile, nextState, currentSettings.DLLOverridePath); err != nil {
 				command.reply <- stateReply{state: cloneState(state), err: err}
 				continue
 			}
@@ -508,11 +565,53 @@ func runStateOwner(stateCommands <-chan stateCommand, gpioAdapter gpio.Adapter, 
 				command.reply <- stateReply{state: cloneState(state), err: err}
 				continue
 			}
-			if err := saveSettings(settingsFile, nextState); err != nil {
+			if err := saveSettings(settingsFile, nextState, currentSettings.DLLOverridePath); err != nil {
 				command.reply <- stateReply{state: cloneState(state), err: err}
 				continue
 			}
 			state = nextState
+			command.reply <- stateReply{state: cloneState(state)}
+
+		case "set_dll_override":
+			dllOverridePath, err := applyDLLOverridePath(strings.TrimSpace(command.label))
+			if err != nil {
+				command.reply <- stateReply{state: cloneState(state), err: err}
+				continue
+			}
+
+			nextAdapter, nextRuntimeMode, openErr := gpio.Open(gpio.Config{
+				InputTemplate:  resolvedIOPaths.inputTemplate,
+				OutputTemplate: resolvedIOPaths.outputTemplate,
+				WindowsDLLPath: dllOverridePath,
+			})
+			if openErr != nil {
+				currentRuntimeMode = gpio.RuntimeMode{
+					InputSimulation:  true,
+					OutputSimulation: true,
+					DriverProbeLog:   gpio.ProbeLogFromError(openErr),
+				}
+				state.Runtime = buildRuntimeStateForUI(currentRuntimeMode, currentSettings.DLLOverridePath)
+				state.Runtime.MessageKey = "runtime_demo_mode"
+				state.Runtime.DLLOverridePath = dllOverridePath
+				command.reply <- stateReply{state: cloneState(state)}
+				continue
+			}
+
+			if swapErr := gpioAdapter.Swap(nextAdapter, nextRuntimeMode); swapErr != nil {
+				command.reply <- stateReply{state: cloneState(state), err: swapErr}
+				continue
+			}
+			currentRuntimeMode = nextRuntimeMode
+			currentSettings.DLLOverridePath = dllOverridePath
+			state.Runtime = buildRuntimeStateForUI(currentRuntimeMode, currentSettings.DLLOverridePath)
+			if err := saveSettings(settingsFile, state, currentSettings.DLLOverridePath); err != nil {
+				command.reply <- stateReply{state: cloneState(state), err: err}
+				continue
+			}
+			refreshInputSignals(&state, gpioAdapter)
+			for _, configuredOutput := range state.Outputs {
+				outputPWMController.Apply(configuredOutput)
+			}
 			command.reply <- stateReply{state: cloneState(state)}
 
 		default:
@@ -709,7 +808,7 @@ func parseInputSignal(rawInputSignal string) string {
 	}
 }
 
-func startPWMController(gpioAdapter gpio.Adapter, pwmFrequencyHz float64, simulationMode bool) *pwmController {
+func startPWMController(gpioAdapter gpio.Adapter, pwmFrequencyHz float64) *pwmController {
 	if pwmFrequencyHz <= 0 {
 		pwmFrequencyHz = 100
 	}
@@ -721,7 +820,7 @@ func startPWMController(gpioAdapter gpio.Adapter, pwmFrequencyHz float64, simula
 	for channel := 1; channel <= outputCount; channel++ {
 		channelCommandQueue := make(chan pwmChannelCommand, 1)
 		controller.channelCommands[channel-1] = channelCommandQueue
-		go runPWMChannelLoop(channel, gpioAdapter, pwmFrequencyHz, channelCommandQueue, simulationMode)
+		go runPWMChannelLoop(channel, gpioAdapter, pwmFrequencyHz, channelCommandQueue)
 	}
 
 	return controller
@@ -749,17 +848,10 @@ func (controller *pwmController) Apply(output outputState) {
 	}
 }
 
-func runPWMChannelLoop(channel int, gpioAdapter gpio.Adapter, pwmFrequencyHz float64, channelCommands <-chan pwmChannelCommand, simulationMode bool) {
+func runPWMChannelLoop(channel int, gpioAdapter gpio.Adapter, pwmFrequencyHz float64, channelCommands <-chan pwmChannelCommand) {
 	currentCommand := pwmChannelCommand{power: "off", pwm: 0}
 	pwmPeriod := time.Duration(float64(time.Second) / pwmFrequencyHz)
 	log.Printf("pwm: channel=%d frequency=%.2fHz", channel, pwmFrequencyHz)
-	if simulationMode {
-		log.Printf("pwm: channel=%d test mode enabled, GPIO writes are disabled", channel)
-		for {
-			currentCommand = <-channelCommands
-			_ = currentCommand
-		}
-	}
 
 	for {
 		if currentCommand.power != "on" || currentCommand.pwm <= 0 {
@@ -925,7 +1017,33 @@ func indexOutputsByChannel(savedOutputs []savedOutputState) map[int]savedOutputS
 	return outputsByChannel
 }
 
-func saveSettings(settingsFile string, state appState) error {
+func applyDLLOverridePath(rawPath string) (string, error) {
+	if runtime.GOOS != "windows" {
+		return "", errors.New("DLL override is available only on Windows")
+	}
+	if rawPath == "" {
+		return "", errors.New("dll path is required")
+	}
+	if !strings.EqualFold(filepath.Ext(rawPath), ".dll") {
+		return "", errors.New("selected file must have .dll extension")
+	}
+
+	fileInfo, err := os.Stat(rawPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read DLL file: %w", err)
+	}
+	if fileInfo.IsDir() {
+		return "", errors.New("selected path points to a directory")
+	}
+
+	absolutePath, err := filepath.Abs(rawPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to normalize DLL path: %w", err)
+	}
+	return absolutePath, nil
+}
+
+func saveSettings(settingsFile string, state appState, dllOverridePath string) error {
 	labels := map[string]string{}
 	for _, singleInput := range state.Inputs {
 		labels["input-"+strconv.Itoa(singleInput.Channel)] = singleInput.Label
@@ -943,7 +1061,11 @@ func saveSettings(settingsFile string, state appState) error {
 		})
 	}
 
-	settings := persistedSettings{Labels: labels, Outputs: savedOutputs}
+	settings := persistedSettings{
+		Labels:          labels,
+		Outputs:         savedOutputs,
+		DLLOverridePath: strings.TrimSpace(dllOverridePath),
+	}
 	fileData, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err
@@ -1321,6 +1443,77 @@ func handleSetLabel(stateCommands chan<- stateCommand) http.HandlerFunc {
 
 		writeJSON(writer, result.state)
 	}
+}
+
+func handleSetDLLOverride(stateCommands chan<- stateCommand) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := request.ParseMultipartForm(24 << 20); err != nil {
+			http.Error(writer, "invalid multipart form", http.StatusBadRequest)
+			return
+		}
+		uploadedFile, uploadedHeader, err := request.FormFile("dll_file")
+		if err != nil {
+			http.Error(writer, "missing dll file", http.StatusBadRequest)
+			return
+		}
+		defer uploadedFile.Close()
+
+		persistedDLLPath, err := saveUploadedDLLFile(uploadedFile, uploadedHeader.Filename)
+		if err != nil {
+			http.Error(writer, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		reply := make(chan stateReply, 1)
+		stateCommands <- stateCommand{kind: "set_dll_override", label: persistedDLLPath, reply: reply}
+
+		result := <-reply
+		if result.err != nil {
+			http.Error(writer, result.err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		writeJSON(writer, result.state)
+	}
+}
+
+func saveUploadedDLLFile(uploadedDLL io.Reader, originalFilename string) (string, error) {
+	if runtime.GOOS != "windows" {
+		return "", errors.New("DLL override is available only on Windows")
+	}
+
+	sanitizedFilename := strings.TrimSpace(filepath.Base(originalFilename))
+	if sanitizedFilename == "" {
+		return "", errors.New("dll filename is required")
+	}
+	if !strings.EqualFold(filepath.Ext(sanitizedFilename), ".dll") {
+		return "", errors.New("uploaded file must have .dll extension")
+	}
+
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve working directory: %w", err)
+	}
+	overrideDirectory := filepath.Join(workingDirectory, "dll-overrides")
+	if err := os.MkdirAll(overrideDirectory, 0o755); err != nil {
+		return "", fmt.Errorf("failed to create override directory: %w", err)
+	}
+
+	destinationPath := filepath.Join(overrideDirectory, sanitizedFilename)
+	destinationFile, err := os.OpenFile(destinationPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return "", fmt.Errorf("failed to create destination DLL: %w", err)
+	}
+	defer destinationFile.Close()
+
+	if _, err := io.Copy(destinationFile, uploadedDLL); err != nil {
+		return "", fmt.Errorf("failed to save uploaded DLL: %w", err)
+	}
+	return destinationPath, nil
 }
 
 func writeJSON(writer http.ResponseWriter, payload any) {
