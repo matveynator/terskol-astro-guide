@@ -1456,6 +1456,7 @@
       }
 
       applicationModel.errorText = t("runtime_dll_override_saved");
+      applicationModel.runtimeLogDismissed = false;
       applicationModel.runtimeDLLSelectedFilePath = "";
       dllOverrideFileElement.value = "";
       applyStateFromServer(await response.json(), true);
