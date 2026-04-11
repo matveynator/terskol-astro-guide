@@ -32,9 +32,11 @@
     "runtime_probe_log_close_demo": "Read log and continue in demo mode",
     "runtime_dll_override_placeholder": "Selected DLL override path",
     "runtime_dll_override_choose": "Choose",
-    "runtime_dll_override_apply": "Load GPU drivers",
-    "runtime_dll_override_saved": "GPU driver check finished. See the log above.",
-    "runtime_dll_override_error_missing_file": "Select a DLL file before upload."
+    "runtime_dll_override_apply": "Load GPIO/DIO drivers",
+    "runtime_dll_override_try": "Try loading DLL to reconnect GPIO",
+    "runtime_dll_override_saved": "GPIO/DIO driver check finished. See the log above.",
+    "runtime_dll_override_error_missing_file": "Select a DLL file before upload.",
+    "runtime_dll_override_windows_only": "DLL override is available only on Windows. Linux and macOS use system drivers."
   },
   "ru": {
     "html_lang": "ru",
@@ -69,9 +71,11 @@
     "runtime_probe_log_close_demo": "Прочитать лог и запустить демо-режим",
     "runtime_dll_override_placeholder": "Путь к выбранной DLL",
     "runtime_dll_override_choose": "Выбрать",
-    "runtime_dll_override_apply": "Подгрузить драйверы GPU",
-    "runtime_dll_override_saved": "Проверка драйверов GPU завершена. Смотрите лог выше.",
-    "runtime_dll_override_error_missing_file": "Перед загрузкой выберите DLL-файл."
+    "runtime_dll_override_apply": "Подгрузить драйверы GPIO/DIO",
+    "runtime_dll_override_try": "Попробовать подгрузить DLL для связи с GPIO",
+    "runtime_dll_override_saved": "Проверка драйверов GPIO/DIO завершена. Смотрите лог выше.",
+    "runtime_dll_override_error_missing_file": "Перед загрузкой выберите DLL-файл.",
+    "runtime_dll_override_windows_only": "Переопределение DLL доступно только в Windows. На Linux и macOS используются системные драйверы."
   },
   "de": {
     "html_lang": "de",
@@ -104,11 +108,13 @@
     "runtime_probe_log_title": "Windows-DLL-Protokoll",
     "runtime_probe_log_close": "Protokoll schließen",
     "runtime_probe_log_close_demo": "Protokoll lesen und im Demo-Modus fortfahren",
-    "runtime_dll_override_placeholder": "Selected DLL override path",
-    "runtime_dll_override_choose": "Choose",
-    "runtime_dll_override_apply": "Upload and save DLL",
-    "runtime_dll_override_saved": "GPU driver check finished. See the log above.",
-    "runtime_dll_override_error_missing_file": "Select a DLL file before upload."
+    "runtime_dll_override_placeholder": "Pfad zur ausgewählten DLL",
+    "runtime_dll_override_choose": "Auswählen",
+    "runtime_dll_override_apply": "GPIO/DIO-Treiber laden",
+    "runtime_dll_override_try": "DLL laden, um GPIO wieder zu verbinden",
+    "runtime_dll_override_saved": "GPIO/DIO-Treiberprüfung abgeschlossen. Siehe Protokoll oben.",
+    "runtime_dll_override_error_missing_file": "Wählen Sie vor dem Laden eine DLL-Datei aus.",
+    "runtime_dll_override_windows_only": "Die DLL-Überschreibung ist nur unter Windows verfügbar. Unter Linux und macOS werden Systemtreiber verwendet."
   },
   "fr": {
     "html_lang": "fr",
@@ -141,11 +147,13 @@
     "runtime_probe_log_title": "Journal de sondage DLL Windows",
     "runtime_probe_log_close": "Fermer le journal",
     "runtime_probe_log_close_demo": "Lire le journal et continuer en mode démo",
-    "runtime_dll_override_placeholder": "Selected DLL override path",
-    "runtime_dll_override_choose": "Choose",
-    "runtime_dll_override_apply": "Upload and save DLL",
-    "runtime_dll_override_saved": "GPU driver check finished. See the log above.",
-    "runtime_dll_override_error_missing_file": "Select a DLL file before upload."
+    "runtime_dll_override_placeholder": "Chemin de la DLL sélectionnée",
+    "runtime_dll_override_choose": "Choisir",
+    "runtime_dll_override_apply": "Charger les pilotes GPIO/DIO",
+    "runtime_dll_override_try": "Essayer de charger la DLL pour reconnecter GPIO",
+    "runtime_dll_override_saved": "Vérification des pilotes GPIO/DIO terminée. Voir le journal ci-dessus.",
+    "runtime_dll_override_error_missing_file": "Sélectionnez un fichier DLL avant de charger.",
+    "runtime_dll_override_windows_only": "Le remplacement DLL est disponible uniquement sous Windows. Linux et macOS utilisent les pilotes système."
   },
   "ja": {
     "html_lang": "ja",
@@ -178,11 +186,13 @@
     "runtime_probe_log_title": "Windows DLL 検証ログ",
     "runtime_probe_log_close": "ログを閉じる",
     "runtime_probe_log_close_demo": "ログを読んでデモモードで続行",
-    "runtime_dll_override_placeholder": "Selected DLL override path",
-    "runtime_dll_override_choose": "Choose",
-    "runtime_dll_override_apply": "Upload and save DLL",
-    "runtime_dll_override_saved": "GPU driver check finished. See the log above.",
-    "runtime_dll_override_error_missing_file": "Select a DLL file before upload."
+    "runtime_dll_override_placeholder": "選択した DLL のパス",
+    "runtime_dll_override_choose": "選択",
+    "runtime_dll_override_apply": "GPIO/DIO ドライバーを読み込む",
+    "runtime_dll_override_try": "DLLを読み込みGPIO接続を再試行",
+    "runtime_dll_override_saved": "GPIO/DIO ドライバーの確認が完了しました。上のログを確認してください。",
+    "runtime_dll_override_error_missing_file": "読み込み前に DLL ファイルを選択してください。",
+    "runtime_dll_override_windows_only": "DLL の上書きは Windows のみ対応です。Linux と macOS はシステムドライバーを使用します。"
   },
   "uk": {
     "html_lang": "uk",
@@ -215,10 +225,12 @@
     "runtime_probe_log_title": "Лог перевірки Windows DLL",
     "runtime_probe_log_close": "Закрити лог",
     "runtime_probe_log_close_demo": "Прочитати лог і продовжити в демо-режимі",
-    "runtime_dll_override_placeholder": "Selected DLL override path",
-    "runtime_dll_override_choose": "Choose",
-    "runtime_dll_override_apply": "Upload and save DLL",
-    "runtime_dll_override_saved": "GPU driver check finished. See the log above.",
-    "runtime_dll_override_error_missing_file": "Select a DLL file before upload."
+    "runtime_dll_override_placeholder": "Шлях до вибраної DLL",
+    "runtime_dll_override_choose": "Вибрати",
+    "runtime_dll_override_apply": "Завантажити драйвери GPIO/DIO",
+    "runtime_dll_override_try": "Спробувати завантажити DLL для відновлення GPIO",
+    "runtime_dll_override_saved": "Перевірку драйверів GPIO/DIO завершено. Дивіться лог вище.",
+    "runtime_dll_override_error_missing_file": "Перед завантаженням виберіть DLL-файл.",
+    "runtime_dll_override_windows_only": "Перевизначення DLL доступне лише у Windows. У Linux і macOS використовуються системні драйвери."
   }
 }

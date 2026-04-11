@@ -74,15 +74,15 @@ func DefaultOutputTemplate() string {
 }
 
 func Open(config Config) (Adapter, RuntimeMode, error) {
-	adapter, mode, err := openWindowsAdapter(config.WindowsDLLPath)
+	adapter, mode, err := openWindowsAdapter(config.WindowsDLLPath, config.StrictWindowsDLL)
 	if err != nil {
 		return nil, RuntimeMode{}, err
 	}
 	return adapter, mode, nil
 }
 
-func openWindowsAdapter(overrideDLLPath string) (*windowsAdapter, RuntimeMode, error) {
-	searchOrder := windowsDLLSearchOrder(overrideDLLPath)
+func openWindowsAdapter(overrideDLLPath string, strictOverride bool) (*windowsAdapter, RuntimeMode, error) {
+	searchOrder := windowsDLLSearchOrder(overrideDLLPath, strictOverride)
 	allProbeAttempts := make([]windowsDriverProbeAttempt, 0, len(searchOrder))
 	for _, dllName := range searchOrder {
 		adapter, probeAttempt, err := tryOpenWindowsAdapter(dllName)
@@ -105,7 +105,7 @@ func openWindowsAdapter(overrideDLLPath string) (*windowsAdapter, RuntimeMode, e
 	}
 }
 
-func windowsDLLSearchOrder(overrideDLLPath string) []string {
+func windowsDLLSearchOrder(overrideDLLPath string, strictOverride bool) []string {
 	driverDir := strings.TrimSpace(os.Getenv("CHICHA_GPIO_WINDOWS_DRIVER_DIR"))
 	customDLL := strings.TrimSpace(os.Getenv("CHICHA_GPIO_WINDOWS_DLL"))
 	overridePath := strings.TrimSpace(overrideDLLPath)
@@ -113,6 +113,9 @@ func windowsDLLSearchOrder(overrideDLLPath string) []string {
 	searchOrder := make([]string, 0, len(vecowDLLCandidates)+3)
 	if overridePath != "" {
 		searchOrder = append(searchOrder, overridePath)
+		if strictOverride {
+			return searchOrder
+		}
 	}
 	if customDLL != "" {
 		searchOrder = append(searchOrder, customDLL)

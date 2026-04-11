@@ -96,10 +96,11 @@ type ioPaths struct {
 }
 
 type runtimeState struct {
-	TestMode        bool   `json:"test_mode"`
-	Message         string `json:"message"`
-	MessageKey      string `json:"message_key"`
-	DLLOverridePath string `json:"dll_override_path"`
+	TestMode             bool   `json:"test_mode"`
+	Message              string `json:"message"`
+	MessageKey           string `json:"message_key"`
+	DLLOverridePath      string `json:"dll_override_path"`
+	DLLOverrideAvailable bool   `json:"dll_override_available"`
 }
 
 type savedOutputState struct {
@@ -174,9 +175,10 @@ func main() {
 	defer cleanupWindowsDriverDirectory()
 
 	gpioAdapter, runtimeMode, err := gpio.Open(gpio.Config{
-		InputTemplate:  resolvedIOPaths.inputTemplate,
-		OutputTemplate: resolvedIOPaths.outputTemplate,
-		WindowsDLLPath: loadedSettings.DLLOverridePath,
+		InputTemplate:    resolvedIOPaths.inputTemplate,
+		OutputTemplate:   resolvedIOPaths.outputTemplate,
+		WindowsDLLPath:   loadedSettings.DLLOverridePath,
+		StrictWindowsDLL: strings.TrimSpace(loadedSettings.DLLOverridePath) != "",
 	})
 	if err != nil {
 		log.Printf("startup: GPIO init failed, continue in simulation mode: %v", err)
@@ -346,6 +348,7 @@ func logRuntimeMode(mode gpio.RuntimeMode, resolvedIOPaths ioPaths) {
 
 func buildRuntimeStateForUI(mode gpio.RuntimeMode, dllOverridePath string) runtimeState {
 	assembledState := runtimeState{}
+	assembledState.DLLOverrideAvailable = runtime.GOOS == "windows"
 	if mode.InputSimulation || mode.OutputSimulation {
 		assembledState.TestMode = true
 		assembledState.MessageKey = "runtime_demo_mode"
@@ -580,9 +583,10 @@ func runStateOwner(stateCommands <-chan stateCommand, gpioAdapter *hotSwapGPIOAd
 			}
 
 			nextAdapter, nextRuntimeMode, openErr := gpio.Open(gpio.Config{
-				InputTemplate:  resolvedIOPaths.inputTemplate,
-				OutputTemplate: resolvedIOPaths.outputTemplate,
-				WindowsDLLPath: dllOverridePath,
+				InputTemplate:    resolvedIOPaths.inputTemplate,
+				OutputTemplate:   resolvedIOPaths.outputTemplate,
+				WindowsDLLPath:   dllOverridePath,
+				StrictWindowsDLL: true,
 			})
 			if openErr != nil {
 				currentRuntimeMode = gpio.RuntimeMode{
@@ -597,6 +601,17 @@ func runStateOwner(stateCommands <-chan stateCommand, gpioAdapter *hotSwapGPIOAd
 				continue
 			}
 
+			// Persist the accepted DLL override before mutating runtime state so
+			// process behavior never diverges from persisted settings.
+			if err := saveSettings(settingsFile, state, dllOverridePath); err != nil {
+				closeErr := nextAdapter.Close()
+				if closeErr != nil {
+					log.Printf("runtime: failed to close staged GPIO adapter after settings save error: %v", closeErr)
+				}
+				command.reply <- stateReply{state: cloneState(state), err: err}
+				continue
+			}
+
 			if swapErr := gpioAdapter.Swap(nextAdapter, nextRuntimeMode); swapErr != nil {
 				command.reply <- stateReply{state: cloneState(state), err: swapErr}
 				continue
@@ -604,10 +619,6 @@ func runStateOwner(stateCommands <-chan stateCommand, gpioAdapter *hotSwapGPIOAd
 			currentRuntimeMode = nextRuntimeMode
 			currentSettings.DLLOverridePath = dllOverridePath
 			state.Runtime = buildRuntimeStateForUI(currentRuntimeMode, currentSettings.DLLOverridePath)
-			if err := saveSettings(settingsFile, state, currentSettings.DLLOverridePath); err != nil {
-				command.reply <- stateReply{state: cloneState(state), err: err}
-				continue
-			}
 			refreshInputSignals(&state, gpioAdapter)
 			for _, configuredOutput := range state.Outputs {
 				outputPWMController.Apply(configuredOutput)

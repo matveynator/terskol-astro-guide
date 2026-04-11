@@ -158,6 +158,27 @@
     .runtime-recovery-panel.visible {
       display: flex;
     }
+    .runtime-recovery-hint {
+      margin: 0;
+      font-size: 13px;
+      color: #c8d3ec;
+    }
+    .dll-override-panel {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 10px;
+      background: rgba(15, 23, 42, 0.75);
+    }
+    .dll-override-status {
+      margin: 0;
+      font-size: 13px;
+      color: #dbe7ff;
+      line-height: 1.4;
+    }
     .runtime-log-header {
       display: flex;
       justify-content: space-between;
@@ -192,40 +213,11 @@
       font-weight: 700;
       cursor: pointer;
     }
-    .dll-override-panel {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      border-top: 1px solid #334155;
-      padding-top: 8px;
-    }
-    .dll-override-row {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-    .dll-override-path {
-      flex: 1;
-      min-width: 320px;
-      max-width: 100%;
-      height: 30px;
-      border-radius: 8px;
-      border: 1px solid #32415f;
-      background: rgba(11, 18, 34, var(--ui-alpha));
-      color: var(--text);
-      padding: 0 8px;
-      font-size: 12px;
-      font-family: "Segoe UI", "Roboto Mono", monospace;
-    }
     .dll-override-actions {
       display: flex;
       gap: 6px;
       align-items: center;
-    }
-    #dll-override-file-label {
-      font-size: 12px;
-      color: #c8d3ec;
-      min-width: 64px;
+      justify-content: flex-end;
     }
     .io-buttons { display: flex; gap: 6px; }
     button { border: 1px solid transparent; border-radius: 8px; height: clamp(24px, 2vw, 32px); font-size: clamp(11px, 0.9vw, 13px); color: white; cursor: pointer; background: rgba(51, 65, 85, var(--ui-alpha)); }
@@ -459,14 +451,12 @@
     <p id="runtime-log-content" class="runtime-log-content"></p>
   </section>
   <section id="runtime-recovery-panel" class="runtime-recovery-panel">
+    <p id="runtime-recovery-hint" class="runtime-recovery-hint"></p>
     <section id="dll-override-panel" class="dll-override-panel">
-      <div class="dll-override-row">
-        <input id="dll-override-path" class="dll-override-path" type="text" readonly />
-      </div>
+      <p id="dll-override-status" class="dll-override-status">Demo mode is active.</p>
       <div class="dll-override-actions">
-        <label id="dll-override-file-label" for="dll-override-file">Выбрать</label>
-        <input id="dll-override-file" type="file" accept=".dll" />
-        <button id="dll-override-apply" type="button">Подгрузить драйверы GPU</button>
+        <input id="dll-override-file" type="file" accept=".dll" hidden />
+        <button id="dll-override-apply" type="button">Попробовать подгрузить DLL</button>
       </div>
     </section>
   </section>
@@ -519,9 +509,8 @@
     runtimeMessage: "",
     runtimeHasDetailedLog: false,
     runtimeIsDemoMode: false,
+    runtimeSupportsDLLOverride: false,
     runtimeLogDismissed: false,
-    runtimeDLLOverridePath: "",
-    runtimeDLLSelectedFilePath: "",
     outputControlInFlightByChannel: {},
     outputLastAppliedAtByChannel: {},
     outputIndicatorRefreshTimerByChannel: {},
@@ -542,13 +531,13 @@
   const errorTextElement = document.getElementById("error-text");
   const runtimeLogPanelElement = document.getElementById("runtime-log-panel");
   const runtimeRecoveryPanelElement = document.getElementById("runtime-recovery-panel");
+  const runtimeRecoveryHintElement = document.getElementById("runtime-recovery-hint");
   const runtimeLogTitleElement = document.getElementById("runtime-log-title");
   const runtimeLogContentElement = document.getElementById("runtime-log-content");
   const runtimeLogCloseElement = document.getElementById("runtime-log-close");
   const dllOverridePanelElement = document.getElementById("dll-override-panel");
-  const dllOverridePathElement = document.getElementById("dll-override-path");
+  const dllOverrideStatusElement = document.getElementById("dll-override-status");
   const dllOverrideFileElement = document.getElementById("dll-override-file");
-  const dllOverrideFileLabelElement = document.getElementById("dll-override-file-label");
   const dllOverrideApplyElement = document.getElementById("dll-override-apply");
   const documentTitleElement = document.getElementById("document-title");
   const panelPortsTitleElement = document.getElementById("panel-ports-title");
@@ -635,15 +624,13 @@
     applicationModel.runtimeLogDismissed = true;
     renderFromModel();
   });
-  dllOverrideFileElement.addEventListener("change", function handleDLLFileSelection() {
-    const selectedDLLFile = dllOverrideFileElement.files && dllOverrideFileElement.files[0];
-    applicationModel.runtimeDLLSelectedFilePath = selectedDLLFile ? selectedDLLFile.name : "";
-    renderFromModel();
-  });
-  dllOverrideApplyElement.addEventListener("click", function handleDLLOverrideApplyClick() {
-    if (!applicationModel.runtimeIsDemoMode) {
+  dllOverrideApplyElement.addEventListener("click", function handleDLLOverrideSelectClick() {
+    if (!applicationModel.runtimeIsDemoMode || !applicationModel.runtimeSupportsDLLOverride) {
       return;
     }
+    dllOverrideFileElement.click();
+  });
+  dllOverrideFileElement.addEventListener("change", function handleDLLFileSelection() {
     const selectedDLLFile = dllOverrideFileElement.files && dllOverrideFileElement.files[0];
     if (!selectedDLLFile) {
       applicationModel.errorText = t("runtime_dll_override_error_missing_file");
@@ -651,6 +638,7 @@
       return;
     }
     void sendDLLOverrideToServer(selectedDLLFile);
+    renderFromModel();
   });
 
   window.addEventListener("resize", updateApplicationScale);
@@ -679,11 +667,12 @@
 
     const shouldShowRecoveryPanel = applicationModel.runtimeIsDemoMode && !shouldShowRuntimeLog;
     runtimeRecoveryPanelElement.classList.toggle("visible", shouldShowRecoveryPanel);
-    dllOverridePanelElement.style.display = shouldShowRecoveryPanel ? "flex" : "none";
-    dllOverridePathElement.placeholder = t("runtime_dll_override_placeholder");
-    dllOverridePathElement.value = applicationModel.runtimeDLLSelectedFilePath || applicationModel.runtimeDLLOverridePath || "";
-    dllOverrideFileLabelElement.textContent = t("runtime_dll_override_choose");
-    dllOverrideApplyElement.textContent = t("runtime_dll_override_apply");
+    const shouldShowDLLOverrideControls = shouldShowRecoveryPanel && applicationModel.runtimeSupportsDLLOverride;
+    dllOverridePanelElement.style.display = shouldShowDLLOverrideControls ? "flex" : "none";
+    runtimeRecoveryHintElement.style.display = shouldShowRecoveryPanel && !applicationModel.runtimeSupportsDLLOverride ? "block" : "none";
+    runtimeRecoveryHintElement.textContent = t("runtime_dll_override_windows_only");
+    dllOverrideStatusElement.textContent = t("runtime_demo_mode");
+    dllOverrideApplyElement.textContent = t("runtime_dll_override_try");
   }
 
   function renderPortIndicatorTable() {
@@ -1250,7 +1239,7 @@
       applicationModel.runtimeLogDismissed = false;
     }
     applicationModel.runtimeIsDemoMode = Boolean(serverState.runtime && serverState.runtime.test_mode);
-    applicationModel.runtimeDLLOverridePath = String(serverState.runtime && serverState.runtime.dll_override_path ? serverState.runtime.dll_override_path : "");
+    applicationModel.runtimeSupportsDLLOverride = Boolean(serverState.runtime && serverState.runtime.dll_override_available);
     syncTimerDefaultsWithOutputs(nextOutputsByChannel);
     clearEndedCountdowns(nextOutputsByChannel);
     applicationModel.errorText = "";
@@ -1444,7 +1433,7 @@
       }
 
       applicationModel.errorText = t("runtime_dll_override_saved");
-      applicationModel.runtimeDLLSelectedFilePath = "";
+      applicationModel.runtimeLogDismissed = false;
       dllOverrideFileElement.value = "";
       applyStateFromServer(await response.json(), true);
     });
