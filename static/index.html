@@ -437,6 +437,66 @@
       text-decoration: underline;
       cursor: pointer;
     }
+    .guiding-panel {
+      background: rgba(18, 26, 47, var(--ui-alpha));
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 8px;
+      display: grid;
+      grid-template-columns: minmax(320px, 2fr) minmax(260px, 1fr);
+      gap: 10px;
+    }
+    .guiding-canvas-wrap {
+      position: relative;
+      min-height: 260px;
+      border: 1px solid #2b3d5f;
+      border-radius: 10px;
+      overflow: hidden;
+      background: rgba(2, 6, 23, 0.75);
+    }
+    .guiding-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: crosshair;
+    }
+    .guiding-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .guiding-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 12px;
+      color: #d2ddf6;
+    }
+    .guiding-field input {
+      height: 30px;
+      border-radius: 7px;
+      border: 1px solid #374b70;
+      background: rgba(10, 16, 29, 0.92);
+      color: var(--text);
+      padding: 0 8px;
+      font-size: 12px;
+    }
+    .guiding-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .guiding-log {
+      border: 1px solid #334155;
+      border-radius: 8px;
+      background: rgba(2, 6, 23, 0.85);
+      padding: 8px;
+      min-height: 110px;
+      font-size: 12px;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      color: #dbeafe;
+    }
   </style>
 </head>
 <body>
@@ -482,6 +542,33 @@
       <div id="output-grid" class="channels"></div>
     </article>
   </section>
+
+  <section class="guiding-panel">
+    <div class="guiding-canvas-wrap">
+      <canvas id="guiding-canvas" class="guiding-canvas" width="800" height="450"></canvas>
+    </div>
+    <aside class="guiding-controls">
+      <h2>Guiding preview</h2>
+      <label class="guiding-field">
+        Frame image
+        <input id="guiding-image-file-input" type="file" accept="image/*">
+      </label>
+      <div class="guiding-row">
+        <button id="guiding-analyze-button" type="button">Analyze frame</button>
+        <button id="guiding-reset-target-button" type="button">Reset target</button>
+      </div>
+      <label class="guiding-field">
+        Search radius (px)
+        <input id="guiding-search-radius-input" type="number" min="8" max="160" value="42">
+      </label>
+      <label class="guiding-field">
+        Catalog search by name
+        <input id="guiding-catalog-name-input" type="text" placeholder="Vega">
+      </label>
+      <button id="guiding-catalog-search-button" type="button">Find in catalog</button>
+      <div id="guiding-log" class="guiding-log">Load a frame, click a star, then run Analyze frame.</div>
+    </aside>
+  </section>
   <footer class="repository-footer">
     <a href="https://github.com/matveynator/chicha-astro-control" id="repository-link">https://github.com/matveynator/chicha-astro-control</a>
   </footer>
@@ -515,7 +602,15 @@
     outputLastAppliedAtByChannel: {},
     outputIndicatorRefreshTimerByChannel: {},
     lastStateSignature: "",
-    lastRenderedCountdownSecondByChannel: {}
+    lastRenderedCountdownSecondByChannel: {},
+    guidingImageElement: null,
+    guidingImageBase64: "",
+    guidingTargetX: null,
+    guidingTargetY: null,
+    guidingFoundX: null,
+    guidingFoundY: null,
+    guidingCorrectionHint: "",
+    guidingConfidence: 0
   };
   const outputMaxVoltage = 3.3;
   const defaultLanguageCode = "en";
@@ -549,6 +644,14 @@
   const repositoryLinkElement = document.getElementById("repository-link");
   const portLinkStateElement = document.getElementById("port-link-state");
   const portHoverTooltipElement = document.getElementById("port-hover-tooltip");
+  const guidingCanvasElement = document.getElementById("guiding-canvas");
+  const guidingImageFileInputElement = document.getElementById("guiding-image-file-input");
+  const guidingAnalyzeButtonElement = document.getElementById("guiding-analyze-button");
+  const guidingResetTargetButtonElement = document.getElementById("guiding-reset-target-button");
+  const guidingSearchRadiusInputElement = document.getElementById("guiding-search-radius-input");
+  const guidingCatalogNameInputElement = document.getElementById("guiding-catalog-name-input");
+  const guidingCatalogSearchButtonElement = document.getElementById("guiding-catalog-search-button");
+  const guidingLogElement = document.getElementById("guiding-log");
   const controlChannelSocketsByChannel = {};
   let outputControlRequestSequence = 1;
 
@@ -640,6 +743,48 @@
     void sendDLLOverrideToServer(selectedDLLFile);
     renderFromModel();
   });
+  guidingCanvasElement.addEventListener("click", function handleGuidingCanvasClick(mouseEvent) {
+    if (!applicationModel.guidingImageElement) {
+      return;
+    }
+
+    const canvasRect = guidingCanvasElement.getBoundingClientRect();
+    const clickX = mouseEvent.clientX - canvasRect.left;
+    const clickY = mouseEvent.clientY - canvasRect.top;
+    const sourceWidth = applicationModel.guidingImageElement.naturalWidth;
+    const sourceHeight = applicationModel.guidingImageElement.naturalHeight;
+    const scaleX = sourceWidth / guidingCanvasElement.width;
+    const scaleY = sourceHeight / guidingCanvasElement.height;
+    applicationModel.guidingTargetX = clickX * scaleX;
+    applicationModel.guidingTargetY = clickY * scaleY;
+    applicationModel.guidingFoundX = null;
+    applicationModel.guidingFoundY = null;
+    applicationModel.guidingCorrectionHint = "Target selected. Run Analyze frame.";
+    renderGuidingCanvas();
+    renderGuidingLog();
+  });
+  guidingImageFileInputElement.addEventListener("change", function handleGuidingImageSelection() {
+    const selectedImageFile = guidingImageFileInputElement.files && guidingImageFileInputElement.files[0];
+    if (!selectedImageFile) {
+      return;
+    }
+    void loadGuidingFrameFromFile(selectedImageFile);
+  });
+  guidingAnalyzeButtonElement.addEventListener("click", function handleAnalyzeButtonClick() {
+    void analyzeGuidingFrame();
+  });
+  guidingResetTargetButtonElement.addEventListener("click", function handleGuidingResetButtonClick() {
+    applicationModel.guidingTargetX = null;
+    applicationModel.guidingTargetY = null;
+    applicationModel.guidingFoundX = null;
+    applicationModel.guidingFoundY = null;
+    applicationModel.guidingCorrectionHint = "Target selection was reset.";
+    renderGuidingCanvas();
+    renderGuidingLog();
+  });
+  guidingCatalogSearchButtonElement.addEventListener("click", function handleCatalogSearchClick() {
+    void searchCatalogStarByName();
+  });
 
   window.addEventListener("resize", updateApplicationScale);
 
@@ -649,6 +794,8 @@
     renderPortIndicatorTable();
     renderInputs();
     renderOutputs();
+    renderGuidingCanvas();
+    renderGuidingLog();
     updateApplicationScale();
   }
 
@@ -1452,6 +1599,195 @@
       applicationModel.pendingRequest = false;
       renderFromModel();
     }
+  }
+
+  async function loadGuidingFrameFromFile(selectedImageFile) {
+    const fileReader = new FileReader();
+    const loadedDataURL = await new Promise(function resolveWhenLoaded(resolve, reject) {
+      fileReader.addEventListener("load", function handleLoaded() {
+        resolve(String(fileReader.result || ""));
+      });
+      fileReader.addEventListener("error", function handleLoadError() {
+        reject(new Error("Failed to load selected frame."));
+      });
+      fileReader.readAsDataURL(selectedImageFile);
+    });
+
+    const loadedImageElement = await createImageElementFromSource(loadedDataURL);
+    applicationModel.guidingImageBase64 = loadedDataURL;
+    applicationModel.guidingImageElement = loadedImageElement;
+    applicationModel.guidingFoundX = null;
+    applicationModel.guidingFoundY = null;
+    applicationModel.guidingCorrectionHint = "Frame loaded. Click a star to set guide target.";
+    renderGuidingCanvas();
+    renderGuidingLog();
+  }
+
+  function createImageElementFromSource(imageSourceURL) {
+    return new Promise(function resolveImage(resolve, reject) {
+      const createdImageElement = new Image();
+      createdImageElement.addEventListener("load", function handleImageReady() {
+        resolve(createdImageElement);
+      });
+      createdImageElement.addEventListener("error", function handleImageError() {
+        reject(new Error("Image decode failed."));
+      });
+      createdImageElement.src = imageSourceURL;
+    });
+  }
+
+  function renderGuidingCanvas() {
+    const drawingContext = guidingCanvasElement.getContext("2d");
+    if (!drawingContext) {
+      return;
+    }
+
+    drawingContext.clearRect(0, 0, guidingCanvasElement.width, guidingCanvasElement.height);
+    drawingContext.fillStyle = "rgba(2, 6, 23, 0.96)";
+    drawingContext.fillRect(0, 0, guidingCanvasElement.width, guidingCanvasElement.height);
+
+    if (!applicationModel.guidingImageElement) {
+      drawingContext.fillStyle = "#93c5fd";
+      drawingContext.font = "16px Segoe UI";
+      drawingContext.fillText("No guiding frame loaded.", 20, 36);
+      return;
+    }
+
+    drawingContext.drawImage(applicationModel.guidingImageElement, 0, 0, guidingCanvasElement.width, guidingCanvasElement.height);
+    drawFrameCenterMarker(drawingContext);
+    drawGuidingTargetMarker(drawingContext);
+    drawGuidingFoundMarker(drawingContext);
+  }
+
+  function drawFrameCenterMarker(drawingContext) {
+    const centerX = guidingCanvasElement.width / 2;
+    const centerY = guidingCanvasElement.height / 2;
+    drawingContext.strokeStyle = "#60a5fa";
+    drawingContext.lineWidth = 1.5;
+    drawingContext.beginPath();
+    drawingContext.moveTo(centerX - 14, centerY);
+    drawingContext.lineTo(centerX + 14, centerY);
+    drawingContext.moveTo(centerX, centerY - 14);
+    drawingContext.lineTo(centerX, centerY + 14);
+    drawingContext.stroke();
+  }
+
+  function drawGuidingTargetMarker(drawingContext) {
+    if (applicationModel.guidingTargetX === null || applicationModel.guidingTargetY === null) {
+      return;
+    }
+    const canvasPoint = convertSourcePointToCanvasPoint(applicationModel.guidingTargetX, applicationModel.guidingTargetY);
+    drawingContext.strokeStyle = "#22c55e";
+    drawingContext.lineWidth = 2;
+    drawingContext.beginPath();
+    drawingContext.arc(canvasPoint.x, canvasPoint.y, 10, 0, Math.PI * 2);
+    drawingContext.stroke();
+  }
+
+  function drawGuidingFoundMarker(drawingContext) {
+    if (applicationModel.guidingFoundX === null || applicationModel.guidingFoundY === null) {
+      return;
+    }
+    const canvasPoint = convertSourcePointToCanvasPoint(applicationModel.guidingFoundX, applicationModel.guidingFoundY);
+    drawingContext.strokeStyle = "#f59e0b";
+    drawingContext.lineWidth = 2;
+    drawingContext.beginPath();
+    drawingContext.arc(canvasPoint.x, canvasPoint.y, 8, 0, Math.PI * 2);
+    drawingContext.stroke();
+  }
+
+  function convertSourcePointToCanvasPoint(sourceX, sourceY) {
+    const sourceWidth = applicationModel.guidingImageElement ? applicationModel.guidingImageElement.naturalWidth : guidingCanvasElement.width;
+    const sourceHeight = applicationModel.guidingImageElement ? applicationModel.guidingImageElement.naturalHeight : guidingCanvasElement.height;
+    return {
+      x: (sourceX / sourceWidth) * guidingCanvasElement.width,
+      y: (sourceY / sourceHeight) * guidingCanvasElement.height
+    };
+  }
+
+  async function analyzeGuidingFrame() {
+    if (!applicationModel.guidingImageBase64) {
+      applicationModel.guidingCorrectionHint = "Load a frame before analysis.";
+      renderGuidingLog();
+      return;
+    }
+    if (applicationModel.guidingTargetX === null || applicationModel.guidingTargetY === null) {
+      applicationModel.guidingCorrectionHint = "Select a target star on the frame.";
+      renderGuidingLog();
+      return;
+    }
+
+    const searchRadiusPixels = Number(guidingSearchRadiusInputElement.value || "42");
+    try {
+      const analyzeResponse = await fetch("/api/guiding/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image_data: applicationModel.guidingImageBase64,
+          selected_x: applicationModel.guidingTargetX,
+          selected_y: applicationModel.guidingTargetY,
+          search_radius: searchRadiusPixels
+        })
+      });
+      if (!analyzeResponse.ok) {
+        throw new Error(await analyzeResponse.text());
+      }
+
+      const analyzePayload = await analyzeResponse.json();
+      applicationModel.guidingFoundX = analyzePayload.found_x;
+      applicationModel.guidingFoundY = analyzePayload.found_y;
+      applicationModel.guidingConfidence = analyzePayload.confidence;
+      applicationModel.guidingCorrectionHint = analyzePayload.correction_hint;
+      renderGuidingCanvas();
+      renderGuidingLog();
+    } catch (analysisError) {
+      applicationModel.guidingCorrectionHint = "Analyze failed: " + String(analysisError);
+      renderGuidingLog();
+    }
+  }
+
+  async function searchCatalogStarByName() {
+    const starNameQuery = String(guidingCatalogNameInputElement.value || "").trim();
+    if (starNameQuery === "") {
+      applicationModel.guidingCorrectionHint = "Enter star name before catalog search.";
+      renderGuidingLog();
+      return;
+    }
+
+    try {
+      const catalogResponse = await fetch("/api/guiding/catalog/search?name=" + encodeURIComponent(starNameQuery));
+      if (!catalogResponse.ok) {
+        throw new Error(await catalogResponse.text());
+      }
+      const foundCatalogEntries = await catalogResponse.json();
+      if (!Array.isArray(foundCatalogEntries) || foundCatalogEntries.length === 0) {
+        applicationModel.guidingCorrectionHint = "Catalog: no star found for query \"" + starNameQuery + "\".";
+      } else {
+        const firstCatalogEntry = foundCatalogEntries[0];
+        applicationModel.guidingCorrectionHint =
+          "Catalog: " + firstCatalogEntry.name +
+          " (" + firstCatalogEntry.constellation + "), RA " + firstCatalogEntry.right_ascension_hour +
+          "h, DEC " + firstCatalogEntry.declination_deg + "°, mag " + firstCatalogEntry.visual_magnitude + ".";
+      }
+      renderGuidingLog();
+    } catch (catalogError) {
+      applicationModel.guidingCorrectionHint = "Catalog search failed: " + String(catalogError);
+      renderGuidingLog();
+    }
+  }
+
+  function renderGuidingLog() {
+    const hasTarget = applicationModel.guidingTargetX !== null && applicationModel.guidingTargetY !== null;
+    const hasFound = applicationModel.guidingFoundX !== null && applicationModel.guidingFoundY !== null;
+    const lines = [];
+    lines.push("Guiding status:");
+    lines.push(hasTarget ? "Target: x=" + applicationModel.guidingTargetX.toFixed(1) + ", y=" + applicationModel.guidingTargetY.toFixed(1) : "Target: not selected");
+    lines.push(hasFound ? "Found: x=" + applicationModel.guidingFoundX.toFixed(1) + ", y=" + applicationModel.guidingFoundY.toFixed(1) : "Found: not analyzed");
+    lines.push("Confidence: " + Number(applicationModel.guidingConfidence || 0).toFixed(2));
+    if (applicationModel.guidingCorrectionHint) {
+      lines.push("Hint: " + applicationModel.guidingCorrectionHint);
+    }
+    guidingLogElement.textContent = lines.join("\n");
   }
 
   function sortAscendingNumbers(leftNumber, rightNumber) {

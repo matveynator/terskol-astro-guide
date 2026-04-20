@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"embed"
 	"encoding/base64"
@@ -9,6 +10,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"io/fs"
 	"log"
@@ -27,6 +32,7 @@ import (
 	"time"
 
 	"chicha-astro-control/pkg/gpio"
+	"chicha-astro-control/pkg/guiding"
 	webview "github.com/jchv/go-webview-selector"
 )
 
@@ -88,6 +94,18 @@ type setLabelRequest struct {
 	Kind    string `json:"kind"`
 	Channel int    `json:"channel"`
 	Label   string `json:"label"`
+}
+
+type guidingAnalyzeRequest struct {
+	ImageData    string  `json:"image_data"`
+	SelectedX    float64 `json:"selected_x"`
+	SelectedY    float64 `json:"selected_y"`
+	SearchRadius int     `json:"search_radius"`
+}
+
+type guidingCatalogNearestRequest struct {
+	RightAscensionHour float64 `json:"right_ascension_hour"`
+	DeclinationDeg     float64 `json:"declination_deg"`
 }
 
 type ioPaths struct {
@@ -220,6 +238,9 @@ func main() {
 	http.HandleFunc("/api/label", handleSetLabel(stateCommands))
 	http.HandleFunc("/api/open/repository", handleOpenRepository)
 	http.HandleFunc("/api/runtime/dll-override", handleSetDLLOverride(stateCommands))
+	http.HandleFunc("/api/guiding/analyze", handleGuidingAnalyze)
+	http.HandleFunc("/api/guiding/catalog/search", handleGuidingCatalogSearch)
+	http.HandleFunc("/api/guiding/catalog/nearest", handleGuidingCatalogNearest)
 	http.HandleFunc("/", handleRequest)
 
 	httpListener, address := listenOnFirstAvailablePort(defaultStartPort)
@@ -1490,6 +1511,96 @@ func handleSetDLLOverride(stateCommands chan<- stateCommand) http.HandlerFunc {
 
 		writeJSON(writer, result.state)
 	}
+}
+
+func handleGuidingAnalyze(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		writeJSONError(writer, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var analyzeRequest guidingAnalyzeRequest
+	if err := json.NewDecoder(request.Body).Decode(&analyzeRequest); err != nil {
+		writeJSONError(writer, http.StatusBadRequest, "invalid analyze payload")
+		return
+	}
+
+	decodedImageBytes, err := decodeBase64ImagePayload(analyzeRequest.ImageData)
+	if err != nil {
+		writeJSONError(writer, http.StatusBadRequest, "invalid image payload")
+		return
+	}
+
+	decodedFrame, _, err := image.Decode(bytes.NewReader(decodedImageBytes))
+	if err != nil {
+		writeJSONError(writer, http.StatusBadRequest, "unsupported image format")
+		return
+	}
+
+	analyzeResult, err := guiding.AnalyzeFrame(decodedFrame, guiding.AnalyzeRequest{
+		SelectedX:    analyzeRequest.SelectedX,
+		SelectedY:    analyzeRequest.SelectedY,
+		SearchRadius: analyzeRequest.SearchRadius,
+	})
+	if err != nil {
+		writeJSONError(writer, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(writer, analyzeResult)
+}
+
+func handleGuidingCatalogSearch(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		writeJSONError(writer, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	queryName := strings.TrimSpace(request.URL.Query().Get("name"))
+	if queryName == "" {
+		writeJSONError(writer, http.StatusBadRequest, "name query is required")
+		return
+	}
+
+	writeJSON(writer, guiding.FindStarByName(queryName))
+}
+
+func handleGuidingCatalogNearest(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		writeJSONError(writer, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var nearestRequest guidingCatalogNearestRequest
+	if err := json.NewDecoder(request.Body).Decode(&nearestRequest); err != nil {
+		writeJSONError(writer, http.StatusBadRequest, "invalid nearest-star payload")
+		return
+	}
+
+	writeJSON(writer, guiding.FindNearestStar(nearestRequest.RightAscensionHour, nearestRequest.DeclinationDeg))
+}
+
+func decodeBase64ImagePayload(imagePayload string) ([]byte, error) {
+	trimmedPayload := strings.TrimSpace(imagePayload)
+	if trimmedPayload == "" {
+		return nil, errors.New("empty image payload")
+	}
+
+	base64Payload := trimmedPayload
+	if strings.HasPrefix(trimmedPayload, "data:") {
+		commaIndex := strings.Index(trimmedPayload, ",")
+		if commaIndex <= 0 || commaIndex == len(trimmedPayload)-1 {
+			return nil, errors.New("invalid data url payload")
+		}
+		base64Payload = trimmedPayload[commaIndex+1:]
+	}
+
+	decodedPayload, decodeErr := base64.StdEncoding.DecodeString(base64Payload)
+	if decodeErr == nil {
+		return decodedPayload, nil
+	}
+
+	return base64.RawStdEncoding.DecodeString(base64Payload)
 }
 
 func saveUploadedDLLFile(uploadedDLL io.Reader, originalFilename string) (string, error) {
