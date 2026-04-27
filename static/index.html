@@ -497,6 +497,32 @@
       white-space: pre-wrap;
       color: #dbeafe;
     }
+    .guiding-center-object-card {
+      border: 1px solid #3b4e75;
+      border-radius: 8px;
+      background: rgba(11, 18, 34, 0.9);
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .guiding-center-object-title {
+      font-size: 11px;
+      color: #9bb0d9;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .guiding-center-object-name {
+      font-size: 15px;
+      color: #f8fafc;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .guiding-center-object-meta {
+      font-size: 12px;
+      color: #c5d3f1;
+      line-height: 1.35;
+    }
   </style>
 </head>
 <body>
@@ -549,6 +575,11 @@
         <input id="guiding-photo-stars-input" type="number" min="3" max="12" value="6">
       </label>
       <button id="guiding-photo-identify-button" type="button">Identify center + surrounding</button>
+      <section class="guiding-center-object-card">
+        <span class="guiding-center-object-title">Center object</span>
+        <span id="guiding-center-object-name" class="guiding-center-object-name">Not identified</span>
+        <span id="guiding-center-object-meta" class="guiding-center-object-meta">Run Identify center + surrounding to solve the frame.</span>
+      </section>
       <div id="guiding-log" class="guiding-log">Load a frame, click a star, then run Analyze frame.</div>
     </aside>
   </section>
@@ -614,7 +645,10 @@
     guidingFoundX: null,
     guidingFoundY: null,
     guidingCorrectionHint: "",
-    guidingConfidence: 0
+    guidingConfidence: 0,
+    guidingIdentifiedStars: [],
+    guidingCenterObjectName: "",
+    guidingCenterObjectMeta: ""
   };
   const outputMaxVoltage = 3.3;
   const defaultLanguageCode = "en";
@@ -657,6 +691,8 @@
   const guidingCatalogSearchButtonElement = document.getElementById("guiding-catalog-search-button");
   const guidingPhotoStarsInputElement = document.getElementById("guiding-photo-stars-input");
   const guidingPhotoIdentifyButtonElement = document.getElementById("guiding-photo-identify-button");
+  const guidingCenterObjectNameElement = document.getElementById("guiding-center-object-name");
+  const guidingCenterObjectMetaElement = document.getElementById("guiding-center-object-meta");
   const guidingLogElement = document.getElementById("guiding-log");
   const controlChannelSocketsByChannel = {};
   let outputControlRequestSequence = 1;
@@ -765,9 +801,13 @@
     applicationModel.guidingTargetY = clickY * scaleY;
     applicationModel.guidingFoundX = null;
     applicationModel.guidingFoundY = null;
+    applicationModel.guidingIdentifiedStars = [];
+    applicationModel.guidingCenterObjectName = "";
+    applicationModel.guidingCenterObjectMeta = "";
     applicationModel.guidingCorrectionHint = "Target selected. Run Analyze frame.";
     renderGuidingCanvas();
     renderGuidingLog();
+    renderGuidingCenterObjectCard();
   });
   guidingImageFileInputElement.addEventListener("change", function handleGuidingImageSelection() {
     const selectedImageFile = guidingImageFileInputElement.files && guidingImageFileInputElement.files[0];
@@ -792,9 +832,13 @@
     applicationModel.guidingTargetY = null;
     applicationModel.guidingFoundX = null;
     applicationModel.guidingFoundY = null;
+    applicationModel.guidingIdentifiedStars = [];
+    applicationModel.guidingCenterObjectName = "";
+    applicationModel.guidingCenterObjectMeta = "";
     applicationModel.guidingCorrectionHint = "Target selection was reset.";
     renderGuidingCanvas();
     renderGuidingLog();
+    renderGuidingCenterObjectCard();
   });
   guidingCatalogSearchButtonElement.addEventListener("click", function handleCatalogSearchClick() {
     void searchCatalogStarByName();
@@ -813,6 +857,7 @@
     renderOutputs();
     renderGuidingCanvas();
     renderGuidingLog();
+    renderGuidingCenterObjectCard();
     updateApplicationScale();
   }
 
@@ -1658,9 +1703,13 @@
     applicationModel.guidingImageElement = loadedImageElement;
     applicationModel.guidingFoundX = null;
     applicationModel.guidingFoundY = null;
+    applicationModel.guidingIdentifiedStars = [];
+    applicationModel.guidingCenterObjectName = "";
+    applicationModel.guidingCenterObjectMeta = "";
     applicationModel.guidingCorrectionHint = "Frame loaded. Click a star to set guide target.";
     renderGuidingCanvas();
     renderGuidingLog();
+    renderGuidingCenterObjectCard();
   }
 
   function isMacOSPlatform() {
@@ -1700,8 +1749,26 @@
 
     drawingContext.drawImage(applicationModel.guidingImageElement, 0, 0, guidingCanvasElement.width, guidingCanvasElement.height);
     drawFrameCenterMarker(drawingContext);
+    drawIdentifiedStarMarkers(drawingContext);
     drawGuidingTargetMarker(drawingContext);
     drawGuidingFoundMarker(drawingContext);
+  }
+
+  function drawIdentifiedStarMarkers(drawingContext) {
+    applicationModel.guidingIdentifiedStars.forEach(function drawMarker(identifiedStarMarker) {
+      const canvasPoint = convertSourcePointToCanvasPoint(identifiedStarMarker.x, identifiedStarMarker.y);
+      drawingContext.strokeStyle = identifiedStarMarker.isCenterObject ? "#a78bfa" : "#38bdf8";
+      drawingContext.lineWidth = identifiedStarMarker.isCenterObject ? 2.2 : 1.4;
+      drawingContext.beginPath();
+      drawingContext.arc(canvasPoint.x, canvasPoint.y, identifiedStarMarker.isCenterObject ? 11 : 8, 0, Math.PI * 2);
+      drawingContext.stroke();
+
+      drawingContext.fillStyle = "rgba(2, 6, 23, 0.8)";
+      drawingContext.fillRect(canvasPoint.x + 7, canvasPoint.y - 12, 88, 14);
+      drawingContext.font = "11px Segoe UI";
+      drawingContext.fillStyle = identifiedStarMarker.isCenterObject ? "#ddd6fe" : "#e0f2fe";
+      drawingContext.fillText(identifiedStarMarker.name, canvasPoint.x + 10, canvasPoint.y - 2);
+    });
   }
 
   function drawFrameCenterMarker(drawingContext) {
@@ -1849,12 +1916,21 @@
       const centerCatalogMatches = Array.isArray(centerStar.catalog_matches) ? centerStar.catalog_matches : [];
       if (centerCatalogMatches.length === 0) {
         applicationModel.guidingCorrectionHint = "Photo catalog: no center-star match.";
+        applicationModel.guidingIdentifiedStars = [];
+        applicationModel.guidingCenterObjectName = "";
+        applicationModel.guidingCenterObjectMeta = "";
+        renderGuidingCanvas();
+        renderGuidingCenterObjectCard();
         renderGuidingLog();
         return;
       }
 
       const centerBestMatch = centerCatalogMatches[0];
       const surroundingStars = Array.isArray(photoCatalogPayload.surrounding_stars) ? photoCatalogPayload.surrounding_stars : [];
+      applicationModel.guidingIdentifiedStars = buildIdentifiedStarMarkers(centerStar, surroundingStars);
+      applicationModel.guidingCenterObjectName = centerBestMatch.name;
+      applicationModel.guidingCenterObjectMeta =
+        centerBestMatch.constellation + ", mag " + String(centerBestMatch.visual_magnitude) + ", provider " + activeCatalogProvider;
       const surroundingDescriptions = surroundingStars.slice(0, 4).map(function mapSurroundingStar(starEntry, starIndex) {
         const starMatches = Array.isArray(starEntry.catalog_matches) ? starEntry.catalog_matches : [];
         if (starMatches.length === 0) {
@@ -1867,11 +1943,46 @@
       applicationModel.guidingCorrectionHint =
         "Photo catalog [" + activeCatalogProvider + "]: center≈" + centerBestMatch.name +
         " (" + centerBestMatch.constellation + "). Nearby: " + surroundingDescriptions.join(", ");
+      renderGuidingCanvas();
+      renderGuidingCenterObjectCard();
       renderGuidingLog();
     } catch (identifyError) {
       applicationModel.guidingCorrectionHint = "Photo catalog search failed: " + String(identifyError);
+      applicationModel.guidingIdentifiedStars = [];
+      applicationModel.guidingCenterObjectName = "";
+      applicationModel.guidingCenterObjectMeta = "";
+      renderGuidingCanvas();
+      renderGuidingCenterObjectCard();
       renderGuidingLog();
     }
+  }
+
+  function buildIdentifiedStarMarkers(centerPhotoStar, surroundingPhotoStars) {
+    const identifiedStarMarkers = [];
+    const centerCatalogMatches = Array.isArray(centerPhotoStar.catalog_matches) ? centerPhotoStar.catalog_matches : [];
+    if (typeof centerPhotoStar.x === "number" && typeof centerPhotoStar.y === "number" && centerCatalogMatches.length > 0) {
+      identifiedStarMarkers.push({
+        x: centerPhotoStar.x,
+        y: centerPhotoStar.y,
+        name: centerCatalogMatches[0].name,
+        isCenterObject: true
+      });
+    }
+
+    surroundingPhotoStars.forEach(function appendSurroundingMarker(surroundingPhotoStar) {
+      const surroundingCatalogMatches = Array.isArray(surroundingPhotoStar.catalog_matches) ? surroundingPhotoStar.catalog_matches : [];
+      if (typeof surroundingPhotoStar.x !== "number" || typeof surroundingPhotoStar.y !== "number" || surroundingCatalogMatches.length === 0) {
+        return;
+      }
+      identifiedStarMarkers.push({
+        x: surroundingPhotoStar.x,
+        y: surroundingPhotoStar.y,
+        name: surroundingCatalogMatches[0].name,
+        isCenterObject: false
+      });
+    });
+
+    return identifiedStarMarkers;
   }
 
   function renderGuidingLog() {
@@ -1886,6 +1997,16 @@
       lines.push("Hint: " + applicationModel.guidingCorrectionHint);
     }
     guidingLogElement.textContent = lines.join("\n");
+  }
+
+  function renderGuidingCenterObjectCard() {
+    if (!applicationModel.guidingCenterObjectName) {
+      guidingCenterObjectNameElement.textContent = "Not identified";
+      guidingCenterObjectMetaElement.textContent = "Run Identify center + surrounding to solve the frame.";
+      return;
+    }
+    guidingCenterObjectNameElement.textContent = applicationModel.guidingCenterObjectName;
+    guidingCenterObjectMetaElement.textContent = applicationModel.guidingCenterObjectMeta;
   }
 
   function sortAscendingNumbers(leftNumber, rightNumber) {
