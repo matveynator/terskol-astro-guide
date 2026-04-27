@@ -1,6 +1,7 @@
 package guiding
 
 import (
+	"errors"
 	"math"
 	"strings"
 )
@@ -17,6 +18,7 @@ type CatalogProvider struct {
 	ID          string             `json:"id"`
 	Title       string             `json:"title"`
 	Description string             `json:"description"`
+	Available   bool               `json:"available"`
 	Entries     []StarCatalogEntry `json:"-"`
 }
 
@@ -73,8 +75,15 @@ var catalogProviders = []CatalogProvider{
 }
 
 func ActiveCatalogProvider() CatalogProvider {
+	for _, catalogProvider := range catalogProviders {
+		if catalogProvider.ID == activeCatalogProviderID {
+			return catalogProvider
+		}
+	}
 	return catalogProviders[0]
 }
+
+var activeCatalogProviderID = catalogProviders[0].ID
 
 func ListCatalogProviders() []CatalogProvider {
 	visibleProviders := make([]CatalogProvider, 0, len(catalogProviders))
@@ -83,9 +92,27 @@ func ListCatalogProviders() []CatalogProvider {
 			ID:          provider.ID,
 			Title:       provider.Title,
 			Description: provider.Description,
+			Available:   len(provider.Entries) > 0,
 		})
 	}
 	return visibleProviders
+}
+
+func SetActiveCatalogProvider(providerID string) error {
+	normalizedProviderID := strings.TrimSpace(providerID)
+	if normalizedProviderID == "" {
+		return errors.New("provider id is required")
+	}
+	for _, catalogProvider := range catalogProviders {
+		if catalogProvider.ID == normalizedProviderID {
+			if len(catalogProvider.Entries) == 0 {
+				return errors.New("provider is not installed locally")
+			}
+			activeCatalogProviderID = normalizedProviderID
+			return nil
+		}
+	}
+	return errors.New("unknown provider id")
 }
 
 func FindStarByName(query string) []StarCatalogEntry {

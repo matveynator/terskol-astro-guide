@@ -446,6 +446,15 @@
       grid-template-columns: minmax(320px, 2fr) minmax(260px, 1fr);
       gap: 10px;
     }
+    .guiding-panel.expanded {
+      position: fixed;
+      inset: 8px;
+      z-index: 2100;
+      padding: 0;
+      border: none;
+      background: transparent;
+      grid-template-columns: 1fr;
+    }
     .guiding-canvas-wrap {
       position: relative;
       min-height: 260px;
@@ -464,6 +473,19 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
+    }
+    .guiding-panel.expanded .guiding-controls {
+      position: absolute;
+      right: 12px;
+      top: 12px;
+      width: min(360px, 42vw);
+      max-height: calc(100vh - 24px);
+      overflow: auto;
+      border: 1px solid #2f4266;
+      border-radius: 10px;
+      padding: 10px;
+      background: rgba(8, 13, 24, 0.9);
+      backdrop-filter: blur(2px);
     }
     .guiding-field {
       display: flex;
@@ -485,6 +507,9 @@
       display: flex;
       gap: 6px;
       align-items: center;
+    }
+    .guiding-row button {
+      flex: 1;
     }
     .guiding-log {
       border: 1px solid #334155;
@@ -565,7 +590,7 @@
     </section>
   </section>
 
-  <section class="guiding-panel">
+  <section id="guiding-panel" class="guiding-panel">
     <div class="guiding-canvas-wrap">
       <canvas id="guiding-canvas" class="guiding-canvas" width="800" height="450"></canvas>
     </div>
@@ -579,6 +604,9 @@
         <button id="guiding-analyze-button" type="button">Analyze frame</button>
         <button id="guiding-reset-target-button" type="button">Reset target</button>
       </div>
+      <div class="guiding-row">
+        <button id="guiding-expand-toggle-button" type="button">Expand to app</button>
+      </div>
       <label class="guiding-field">
         Search radius (px)
         <input id="guiding-search-radius-input" type="number" min="8" max="160" value="42">
@@ -590,7 +618,11 @@
       <button id="guiding-catalog-search-button" type="button">Find in catalog</button>
       <label class="guiding-field">
         Stars from photo
-        <input id="guiding-photo-stars-input" type="number" min="3" max="12" value="6">
+        <input id="guiding-photo-stars-input" type="number" min="3" max="40" value="20">
+      </label>
+      <label class="guiding-field">
+        Catalog provider
+        <select id="guiding-catalog-provider-select"></select>
       </label>
       <button id="guiding-photo-identify-button" type="button">Identify center + surrounding</button>
       <section class="guiding-center-object-card">
@@ -667,7 +699,10 @@
     guidingConfidence: 0,
     guidingIdentifiedStars: [],
     guidingCenterObjectName: "",
-    guidingCenterObjectMeta: ""
+    guidingCenterObjectMeta: "",
+    guidingCatalogProviders: [],
+    guidingActiveCatalogProvider: "",
+    guidingExpandedView: false
   };
   const outputMaxVoltage = 3.3;
   const defaultLanguageCode = "en";
@@ -702,11 +737,14 @@
   const portLinkStateElement = document.getElementById("port-link-state");
   const portHoverTooltipElement = document.getElementById("port-hover-tooltip");
   const guidingCanvasElement = document.getElementById("guiding-canvas");
+  const guidingPanelElement = document.getElementById("guiding-panel");
   const guidingImageFileInputElement = document.getElementById("guiding-image-file-input");
   const guidingAnalyzeButtonElement = document.getElementById("guiding-analyze-button");
   const guidingResetTargetButtonElement = document.getElementById("guiding-reset-target-button");
+  const guidingExpandToggleButtonElement = document.getElementById("guiding-expand-toggle-button");
   const guidingSearchRadiusInputElement = document.getElementById("guiding-search-radius-input");
   const guidingCatalogNameInputElement = document.getElementById("guiding-catalog-name-input");
+  const guidingCatalogProviderSelectElement = document.getElementById("guiding-catalog-provider-select");
   const guidingCatalogSearchButtonElement = document.getElementById("guiding-catalog-search-button");
   const guidingPhotoStarsInputElement = document.getElementById("guiding-photo-stars-input");
   const guidingPhotoIdentifyButtonElement = document.getElementById("guiding-photo-identify-button");
@@ -854,6 +892,11 @@
   guidingAnalyzeButtonElement.addEventListener("click", function handleAnalyzeButtonClick() {
     void analyzeGuidingFrame();
   });
+  guidingExpandToggleButtonElement.addEventListener("click", function handleGuidingExpandToggleClick() {
+    applicationModel.guidingExpandedView = !applicationModel.guidingExpandedView;
+    renderGuidingExpandedState();
+    updateApplicationScale();
+  });
   guidingResetTargetButtonElement.addEventListener("click", function handleGuidingResetButtonClick() {
     applicationModel.guidingTargetX = null;
     applicationModel.guidingTargetY = null;
@@ -874,6 +917,10 @@
   guidingPhotoIdentifyButtonElement.addEventListener("click", function handlePhotoCatalogIdentifyClick() {
     void identifyStarsFromPhoto();
   });
+  guidingCatalogProviderSelectElement.addEventListener("change", function handleCatalogProviderSelectionChange() {
+    const selectedProviderID = String(guidingCatalogProviderSelectElement.value || "");
+    void setGuidingCatalogProvider(selectedProviderID);
+  });
 
   window.addEventListener("resize", updateApplicationScale);
 
@@ -886,6 +933,8 @@
     renderGuidingCanvas();
     renderGuidingLog();
     renderGuidingCenterObjectCard();
+    renderGuidingCatalogProviderOptions();
+    renderGuidingExpandedState();
     updateApplicationScale();
   }
 
@@ -1788,16 +1837,14 @@
     applicationModel.guidingIdentifiedStars.forEach(function drawMarker(identifiedStarMarker) {
       const canvasPoint = convertSourcePointToCanvasPoint(identifiedStarMarker.x, identifiedStarMarker.y);
       drawingContext.strokeStyle = identifiedStarMarker.isCenterObject ? "#a78bfa" : "#38bdf8";
-      drawingContext.lineWidth = identifiedStarMarker.isCenterObject ? 2.2 : 1.4;
+      drawingContext.fillStyle = identifiedStarMarker.isCenterObject ? "#c4b5fd" : "#7dd3fc";
+      drawingContext.lineWidth = identifiedStarMarker.isCenterObject ? 1.8 : 1.2;
       drawingContext.beginPath();
-      drawingContext.arc(canvasPoint.x, canvasPoint.y, identifiedStarMarker.isCenterObject ? 11 : 8, 0, Math.PI * 2);
+      drawingContext.arc(canvasPoint.x, canvasPoint.y, identifiedStarMarker.isCenterObject ? 3.2 : 2.5, 0, Math.PI * 2);
+      drawingContext.fill();
+      drawingContext.beginPath();
+      drawingContext.arc(canvasPoint.x, canvasPoint.y, identifiedStarMarker.isCenterObject ? 10 : 7, 0, Math.PI * 2);
       drawingContext.stroke();
-
-      drawingContext.fillStyle = "rgba(2, 6, 23, 0.8)";
-      drawingContext.fillRect(canvasPoint.x + 7, canvasPoint.y - 12, 88, 14);
-      drawingContext.font = "11px Segoe UI";
-      drawingContext.fillStyle = identifiedStarMarker.isCenterObject ? "#ddd6fe" : "#e0f2fe";
-      drawingContext.fillText(identifiedStarMarker.name, canvasPoint.x + 10, canvasPoint.y - 2);
     });
   }
 
@@ -1975,7 +2022,7 @@
         body: JSON.stringify({
           image_data: applicationModel.guidingImageBase64,
           max_stars: maxStars,
-          max_catalog_matches: 3
+          max_catalog_matches: 5
         })
       });
       if (!identifyResponse.ok) {
@@ -2081,6 +2128,70 @@
     }
     guidingCenterObjectNameElement.textContent = applicationModel.guidingCenterObjectName;
     guidingCenterObjectMetaElement.textContent = applicationModel.guidingCenterObjectMeta;
+  }
+
+  function renderGuidingCatalogProviderOptions() {
+    const catalogProviderOptions = applicationModel.guidingCatalogProviders;
+    const existingOptionCount = guidingCatalogProviderSelectElement.options.length;
+    if (existingOptionCount !== catalogProviderOptions.length) {
+      guidingCatalogProviderSelectElement.innerHTML = "";
+      catalogProviderOptions.forEach(function appendCatalogProviderOption(catalogProviderEntry) {
+        const providerOptionElement = document.createElement("option");
+        providerOptionElement.value = catalogProviderEntry.id;
+        providerOptionElement.textContent = catalogProviderEntry.available ? catalogProviderEntry.title : catalogProviderEntry.title + " (not installed)";
+        providerOptionElement.disabled = !catalogProviderEntry.available;
+        guidingCatalogProviderSelectElement.appendChild(providerOptionElement);
+      });
+    }
+    if (applicationModel.guidingActiveCatalogProvider) {
+      guidingCatalogProviderSelectElement.value = applicationModel.guidingActiveCatalogProvider;
+    }
+  }
+
+  function renderGuidingExpandedState() {
+    guidingPanelElement.classList.toggle("expanded", applicationModel.guidingExpandedView);
+    guidingExpandToggleButtonElement.textContent = applicationModel.guidingExpandedView ? "Collapse to window" : "Expand to app";
+  }
+
+  async function loadGuidingCatalogProviders() {
+    try {
+      const providersResponse = await fetch("/api/guiding/catalog/providers");
+      if (!providersResponse.ok) {
+        throw new Error(await providersResponse.text());
+      }
+      const providersPayload = await providersResponse.json();
+      applicationModel.guidingCatalogProviders = Array.isArray(providersPayload.providers) ? providersPayload.providers : [];
+      applicationModel.guidingActiveCatalogProvider = String(providersPayload.active_provider || "");
+      renderGuidingCatalogProviderOptions();
+    } catch (providersError) {
+      applicationModel.errorText = "Catalog provider list failed: " + String(providersError);
+      renderFromModel();
+    }
+  }
+
+  async function setGuidingCatalogProvider(providerID) {
+    if (providerID === "") {
+      return;
+    }
+    try {
+      const setProviderResponse = await fetch("/api/guiding/catalog/active", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider_id: providerID })
+      });
+      if (!setProviderResponse.ok) {
+        throw new Error(await setProviderResponse.text());
+      }
+      const setProviderPayload = await setProviderResponse.json();
+      applicationModel.guidingCatalogProviders = Array.isArray(setProviderPayload.providers) ? setProviderPayload.providers : [];
+      applicationModel.guidingActiveCatalogProvider = String(setProviderPayload.active_provider || "");
+      renderGuidingCatalogProviderOptions();
+      applicationModel.guidingCorrectionHint = "Catalog provider switched to " + applicationModel.guidingActiveCatalogProvider + ".";
+      renderGuidingLog();
+    } catch (setProviderError) {
+      applicationModel.errorText = "Catalog provider switch failed: " + String(setProviderError);
+      renderFromModel();
+    }
   }
 
   function sortAscendingNumbers(leftNumber, rightNumber) {
@@ -2377,6 +2488,7 @@
   }
 
   initializeLocalization().then(function startApplication() {
+    void loadGuidingCatalogProviders();
     requestStateFromServer().then(applyStateFromServer).catch(function handleInitialError(initialError) {
       applicationModel.errorText = String(initialError);
       renderFromModel();

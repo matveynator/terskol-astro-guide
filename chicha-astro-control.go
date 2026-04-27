@@ -114,6 +114,10 @@ type guidingCatalogPhotoIdentifyRequest struct {
 	MaxCatalogMatches int    `json:"max_catalog_matches"`
 }
 
+type guidingCatalogSetActiveRequest struct {
+	ProviderID string `json:"provider_id"`
+}
+
 type guidingNativeFileResponse struct {
 	FileName string `json:"file_name"`
 	DataURL  string `json:"data_url"`
@@ -253,6 +257,7 @@ func main() {
 	http.HandleFunc("/api/guiding/catalog/search", handleGuidingCatalogSearch)
 	http.HandleFunc("/api/guiding/catalog/nearest", handleGuidingCatalogNearest)
 	http.HandleFunc("/api/guiding/catalog/providers", handleGuidingCatalogProviders)
+	http.HandleFunc("/api/guiding/catalog/active", handleGuidingCatalogSetActive)
 	http.HandleFunc("/api/guiding/catalog/identify-photo", handleGuidingCatalogPhotoIdentify)
 	http.HandleFunc("/api/guiding/native-open-image", handleGuidingNativeImageOpen)
 	http.HandleFunc("/", handleRequest)
@@ -1597,6 +1602,29 @@ func handleGuidingCatalogNearest(writer http.ResponseWriter, request *http.Reque
 func handleGuidingCatalogProviders(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet {
 		writeJSONError(writer, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	writeJSON(writer, map[string]any{
+		"active_provider": guiding.ActiveCatalogProvider().ID,
+		"providers":       guiding.ListCatalogProviders(),
+	})
+}
+
+func handleGuidingCatalogSetActive(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		writeJSONError(writer, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var setActiveRequest guidingCatalogSetActiveRequest
+	if err := json.NewDecoder(request.Body).Decode(&setActiveRequest); err != nil {
+		writeJSONError(writer, http.StatusBadRequest, "invalid set-active payload")
+		return
+	}
+
+	if err := guiding.SetActiveCatalogProvider(setActiveRequest.ProviderID); err != nil {
+		writeJSONError(writer, http.StatusBadRequest, err.Error())
 		return
 	}
 

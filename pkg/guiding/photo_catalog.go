@@ -17,6 +17,7 @@ const (
 	minimumPhotoCandidateSeparation  = 8.0
 	defaultMatchToleranceDegrees     = 4.0
 	defaultCatalogNeighborRadiusDegs = 35.0
+	defaultUniqueAssignMaxErrorDegs  = 6.0
 )
 
 type CatalogMatch struct {
@@ -311,7 +312,7 @@ func assignUniqueCatalogMatchesForDetectedStars(detectedStars []DetectedPhotoSta
 		return detectedStars[detectedIndexes[left]].DistanceToCenter > detectedStars[detectedIndexes[right]].DistanceToCenter
 	})
 
-	catalogEntries := ActiveCatalogProvider().Entries
+	catalogEntries := collectCatalogNeighbors(alignment.centerCandidate, ActiveCatalogProvider().Entries, defaultCatalogNeighborRadiusDegs+12)
 	for _, detectedIndex := range detectedIndexes {
 		detectedOffsetVector := vectorFromPoints(alignment.centerVector, vector2{x: detectedStars[detectedIndex].X, y: detectedStars[detectedIndex].Y})
 		predictedOffset := rotateVector(scaleVector(detectedOffsetVector, alignment.scale), alignment.rotationRadians)
@@ -334,7 +335,7 @@ func assignUniqueCatalogMatchesForDetectedStars(detectedStars []DetectedPhotoSta
 			}
 		}
 
-		if bestCatalogEntry.Name == "" {
+		if bestCatalogEntry.Name == "" || bestCatalogScore > defaultUniqueAssignMaxErrorDegs {
 			continue
 		}
 		primaryMatchesByDetectedIndex[detectedIndex] = bestCatalogEntry
