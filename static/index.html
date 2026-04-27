@@ -446,6 +446,15 @@
       grid-template-columns: minmax(320px, 2fr) minmax(260px, 1fr);
       gap: 10px;
     }
+    .guiding-panel.expanded {
+      position: fixed;
+      inset: 8px;
+      z-index: 2100;
+      padding: 0;
+      border: none;
+      background: transparent;
+      grid-template-columns: 1fr;
+    }
     .guiding-canvas-wrap {
       position: relative;
       min-height: 260px;
@@ -464,6 +473,19 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
+    }
+    .guiding-panel.expanded .guiding-controls {
+      position: absolute;
+      right: 12px;
+      top: 12px;
+      width: min(360px, 42vw);
+      max-height: calc(100vh - 24px);
+      overflow: auto;
+      border: 1px solid #2f4266;
+      border-radius: 10px;
+      padding: 10px;
+      background: rgba(8, 13, 24, 0.9);
+      backdrop-filter: blur(2px);
     }
     .guiding-field {
       display: flex;
@@ -486,6 +508,9 @@
       gap: 6px;
       align-items: center;
     }
+    .guiding-row button {
+      flex: 1;
+    }
     .guiding-log {
       border: 1px solid #334155;
       border-radius: 8px;
@@ -496,6 +521,50 @@
       line-height: 1.4;
       white-space: pre-wrap;
       color: #dbeafe;
+    }
+    .guiding-center-object-card {
+      border: 1px solid #3b4e75;
+      border-radius: 8px;
+      background: rgba(11, 18, 34, 0.9);
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .guiding-center-object-title {
+      font-size: 11px;
+      color: #9bb0d9;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .guiding-center-object-name {
+      font-size: 15px;
+      color: #f8fafc;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .guiding-center-object-meta {
+      font-size: 12px;
+      color: #c5d3f1;
+      line-height: 1.35;
+    }
+    .guiding-star-tooltip {
+      position: fixed;
+      z-index: 2200;
+      pointer-events: none;
+      border: 1px solid #3b82f6;
+      border-radius: 6px;
+      background: rgba(2, 6, 23, 0.94);
+      color: #e2e8f0;
+      padding: 4px 6px;
+      font-size: 11px;
+      line-height: 1.2;
+      opacity: 0;
+      transform: translate3d(0, 0, 0);
+      transition: opacity 100ms ease;
+    }
+    .guiding-star-tooltip.visible {
+      opacity: 1;
     }
   </style>
 </head>
@@ -521,6 +590,49 @@
     </section>
   </section>
 
+  <section id="guiding-panel" class="guiding-panel">
+    <div class="guiding-canvas-wrap">
+      <canvas id="guiding-canvas" class="guiding-canvas" width="800" height="450"></canvas>
+    </div>
+    <aside class="guiding-controls">
+      <h2>Guiding preview</h2>
+      <label class="guiding-field">
+        Frame image
+        <input id="guiding-image-file-input" type="file" accept="image/*">
+      </label>
+      <div class="guiding-row">
+        <button id="guiding-analyze-button" type="button">Analyze frame</button>
+        <button id="guiding-reset-target-button" type="button">Reset target</button>
+      </div>
+      <div class="guiding-row">
+        <button id="guiding-expand-toggle-button" type="button">Expand to app</button>
+      </div>
+      <label class="guiding-field">
+        Search radius (px)
+        <input id="guiding-search-radius-input" type="number" min="8" max="160" value="42">
+      </label>
+      <label class="guiding-field">
+        Catalog search by name
+        <input id="guiding-catalog-name-input" type="text" placeholder="Vega">
+      </label>
+      <button id="guiding-catalog-search-button" type="button">Find in catalog</button>
+      <label class="guiding-field">
+        Stars from photo
+        <input id="guiding-photo-stars-input" type="number" min="3" max="40" value="20">
+      </label>
+      <label class="guiding-field">
+        Catalog provider
+        <select id="guiding-catalog-provider-select"></select>
+      </label>
+      <button id="guiding-photo-identify-button" type="button">Identify center + surrounding</button>
+      <section class="guiding-center-object-card">
+        <span class="guiding-center-object-title">Center object</span>
+        <span id="guiding-center-object-name" class="guiding-center-object-name">Not identified</span>
+        <span id="guiding-center-object-meta" class="guiding-center-object-meta">Run Identify center + surrounding to solve the frame.</span>
+      </section>
+      <div id="guiding-log" class="guiding-log">Load a frame, click a star, then run Analyze frame.</div>
+    </aside>
+  </section>
   <section class="layout">
     <article class="panel">
       <h2 id="panel-ports-title">ECX-1000 DIO/GPIO ports:</h2>
@@ -542,39 +654,13 @@
       <div id="output-grid" class="channels"></div>
     </article>
   </section>
-
-  <section class="guiding-panel">
-    <div class="guiding-canvas-wrap">
-      <canvas id="guiding-canvas" class="guiding-canvas" width="800" height="450"></canvas>
-    </div>
-    <aside class="guiding-controls">
-      <h2>Guiding preview</h2>
-      <label class="guiding-field">
-        Frame image
-        <input id="guiding-image-file-input" type="file" accept="image/*">
-      </label>
-      <div class="guiding-row">
-        <button id="guiding-analyze-button" type="button">Analyze frame</button>
-        <button id="guiding-reset-target-button" type="button">Reset target</button>
-      </div>
-      <label class="guiding-field">
-        Search radius (px)
-        <input id="guiding-search-radius-input" type="number" min="8" max="160" value="42">
-      </label>
-      <label class="guiding-field">
-        Catalog search by name
-        <input id="guiding-catalog-name-input" type="text" placeholder="Vega">
-      </label>
-      <button id="guiding-catalog-search-button" type="button">Find in catalog</button>
-      <div id="guiding-log" class="guiding-log">Load a frame, click a star, then run Analyze frame.</div>
-    </aside>
-  </section>
   <footer class="repository-footer">
     <a href="https://github.com/matveynator/chicha-astro-control" id="repository-link">https://github.com/matveynator/chicha-astro-control</a>
   </footer>
 </main>
 </div>
 <div id="port-hover-tooltip" class="port-hover-tooltip"></div>
+<div id="guiding-star-tooltip" class="guiding-star-tooltip"></div>
 
 <script>
   const applicationModel = {
@@ -610,7 +696,13 @@
     guidingFoundX: null,
     guidingFoundY: null,
     guidingCorrectionHint: "",
-    guidingConfidence: 0
+    guidingConfidence: 0,
+    guidingIdentifiedStars: [],
+    guidingCenterObjectName: "",
+    guidingCenterObjectMeta: "",
+    guidingCatalogProviders: [],
+    guidingActiveCatalogProvider: "",
+    guidingExpandedView: false
   };
   const outputMaxVoltage = 3.3;
   const defaultLanguageCode = "en";
@@ -645,13 +737,21 @@
   const portLinkStateElement = document.getElementById("port-link-state");
   const portHoverTooltipElement = document.getElementById("port-hover-tooltip");
   const guidingCanvasElement = document.getElementById("guiding-canvas");
+  const guidingPanelElement = document.getElementById("guiding-panel");
   const guidingImageFileInputElement = document.getElementById("guiding-image-file-input");
   const guidingAnalyzeButtonElement = document.getElementById("guiding-analyze-button");
   const guidingResetTargetButtonElement = document.getElementById("guiding-reset-target-button");
+  const guidingExpandToggleButtonElement = document.getElementById("guiding-expand-toggle-button");
   const guidingSearchRadiusInputElement = document.getElementById("guiding-search-radius-input");
   const guidingCatalogNameInputElement = document.getElementById("guiding-catalog-name-input");
+  const guidingCatalogProviderSelectElement = document.getElementById("guiding-catalog-provider-select");
   const guidingCatalogSearchButtonElement = document.getElementById("guiding-catalog-search-button");
+  const guidingPhotoStarsInputElement = document.getElementById("guiding-photo-stars-input");
+  const guidingPhotoIdentifyButtonElement = document.getElementById("guiding-photo-identify-button");
+  const guidingCenterObjectNameElement = document.getElementById("guiding-center-object-name");
+  const guidingCenterObjectMetaElement = document.getElementById("guiding-center-object-meta");
   const guidingLogElement = document.getElementById("guiding-log");
+  const guidingStarTooltipElement = document.getElementById("guiding-star-tooltip");
   const controlChannelSocketsByChannel = {};
   let outputControlRequestSequence = 1;
 
@@ -759,9 +859,20 @@
     applicationModel.guidingTargetY = clickY * scaleY;
     applicationModel.guidingFoundX = null;
     applicationModel.guidingFoundY = null;
+    applicationModel.guidingIdentifiedStars = [];
+    applicationModel.guidingCenterObjectName = "";
+    applicationModel.guidingCenterObjectMeta = "";
     applicationModel.guidingCorrectionHint = "Target selected. Run Analyze frame.";
+    hideGuidingStarTooltip();
     renderGuidingCanvas();
     renderGuidingLog();
+    renderGuidingCenterObjectCard();
+  });
+  guidingCanvasElement.addEventListener("mousemove", function handleGuidingCanvasMouseMove(mouseEvent) {
+    renderGuidingStarTooltip(mouseEvent);
+  });
+  guidingCanvasElement.addEventListener("mouseleave", function handleGuidingCanvasMouseLeave() {
+    hideGuidingStarTooltip();
   });
   guidingImageFileInputElement.addEventListener("change", function handleGuidingImageSelection() {
     const selectedImageFile = guidingImageFileInputElement.files && guidingImageFileInputElement.files[0];
@@ -781,17 +892,34 @@
   guidingAnalyzeButtonElement.addEventListener("click", function handleAnalyzeButtonClick() {
     void analyzeGuidingFrame();
   });
+  guidingExpandToggleButtonElement.addEventListener("click", function handleGuidingExpandToggleClick() {
+    applicationModel.guidingExpandedView = !applicationModel.guidingExpandedView;
+    renderGuidingExpandedState();
+    updateApplicationScale();
+  });
   guidingResetTargetButtonElement.addEventListener("click", function handleGuidingResetButtonClick() {
     applicationModel.guidingTargetX = null;
     applicationModel.guidingTargetY = null;
     applicationModel.guidingFoundX = null;
     applicationModel.guidingFoundY = null;
+    applicationModel.guidingIdentifiedStars = [];
+    applicationModel.guidingCenterObjectName = "";
+    applicationModel.guidingCenterObjectMeta = "";
     applicationModel.guidingCorrectionHint = "Target selection was reset.";
+    hideGuidingStarTooltip();
     renderGuidingCanvas();
     renderGuidingLog();
+    renderGuidingCenterObjectCard();
   });
   guidingCatalogSearchButtonElement.addEventListener("click", function handleCatalogSearchClick() {
     void searchCatalogStarByName();
+  });
+  guidingPhotoIdentifyButtonElement.addEventListener("click", function handlePhotoCatalogIdentifyClick() {
+    void identifyStarsFromPhoto();
+  });
+  guidingCatalogProviderSelectElement.addEventListener("change", function handleCatalogProviderSelectionChange() {
+    const selectedProviderID = String(guidingCatalogProviderSelectElement.value || "");
+    void setGuidingCatalogProvider(selectedProviderID);
   });
 
   window.addEventListener("resize", updateApplicationScale);
@@ -804,6 +932,9 @@
     renderOutputs();
     renderGuidingCanvas();
     renderGuidingLog();
+    renderGuidingCenterObjectCard();
+    renderGuidingCatalogProviderOptions();
+    renderGuidingExpandedState();
     updateApplicationScale();
   }
 
@@ -1649,9 +1780,14 @@
     applicationModel.guidingImageElement = loadedImageElement;
     applicationModel.guidingFoundX = null;
     applicationModel.guidingFoundY = null;
+    applicationModel.guidingIdentifiedStars = [];
+    applicationModel.guidingCenterObjectName = "";
+    applicationModel.guidingCenterObjectMeta = "";
     applicationModel.guidingCorrectionHint = "Frame loaded. Click a star to set guide target.";
+    hideGuidingStarTooltip();
     renderGuidingCanvas();
     renderGuidingLog();
+    renderGuidingCenterObjectCard();
   }
 
   function isMacOSPlatform() {
@@ -1683,6 +1819,7 @@
     drawingContext.fillRect(0, 0, guidingCanvasElement.width, guidingCanvasElement.height);
 
     if (!applicationModel.guidingImageElement) {
+      hideGuidingStarTooltip();
       drawingContext.fillStyle = "#93c5fd";
       drawingContext.font = "16px Segoe UI";
       drawingContext.fillText("No guiding frame loaded.", 20, 36);
@@ -1691,8 +1828,66 @@
 
     drawingContext.drawImage(applicationModel.guidingImageElement, 0, 0, guidingCanvasElement.width, guidingCanvasElement.height);
     drawFrameCenterMarker(drawingContext);
+    drawIdentifiedStarMarkers(drawingContext);
     drawGuidingTargetMarker(drawingContext);
     drawGuidingFoundMarker(drawingContext);
+  }
+
+  function drawIdentifiedStarMarkers(drawingContext) {
+    applicationModel.guidingIdentifiedStars.forEach(function drawMarker(identifiedStarMarker) {
+      const canvasPoint = convertSourcePointToCanvasPoint(identifiedStarMarker.x, identifiedStarMarker.y);
+      drawingContext.strokeStyle = identifiedStarMarker.isCenterObject ? "#a78bfa" : "#38bdf8";
+      drawingContext.fillStyle = identifiedStarMarker.isCenterObject ? "#c4b5fd" : "#7dd3fc";
+      drawingContext.lineWidth = identifiedStarMarker.isCenterObject ? 1.8 : 1.2;
+      drawingContext.beginPath();
+      drawingContext.arc(canvasPoint.x, canvasPoint.y, identifiedStarMarker.isCenterObject ? 3.2 : 2.5, 0, Math.PI * 2);
+      drawingContext.fill();
+      drawingContext.beginPath();
+      drawingContext.arc(canvasPoint.x, canvasPoint.y, identifiedStarMarker.isCenterObject ? 10 : 7, 0, Math.PI * 2);
+      drawingContext.stroke();
+    });
+  }
+
+  function renderGuidingStarTooltip(mouseEvent) {
+    if (applicationModel.guidingIdentifiedStars.length === 0 || !applicationModel.guidingImageElement) {
+      hideGuidingStarTooltip();
+      return;
+    }
+
+    const canvasRectangle = guidingCanvasElement.getBoundingClientRect();
+    const mouseCanvasX = mouseEvent.clientX - canvasRectangle.left;
+    const mouseCanvasY = mouseEvent.clientY - canvasRectangle.top;
+    const hoveredMarker = findClosestGuidingMarker(mouseCanvasX, mouseCanvasY, 14);
+    if (!hoveredMarker) {
+      hideGuidingStarTooltip();
+      return;
+    }
+
+    guidingStarTooltipElement.textContent = hoveredMarker.name;
+    guidingStarTooltipElement.style.left = String(mouseEvent.clientX + 12) + "px";
+    guidingStarTooltipElement.style.top = String(mouseEvent.clientY + 10) + "px";
+    guidingStarTooltipElement.classList.add("visible");
+  }
+
+  function hideGuidingStarTooltip() {
+    guidingStarTooltipElement.classList.remove("visible");
+  }
+
+  function findClosestGuidingMarker(mouseCanvasX, mouseCanvasY, searchRadiusPixels) {
+    let closestMarker = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    applicationModel.guidingIdentifiedStars.forEach(function scanMarker(identifiedStarMarker) {
+      const markerCanvasPoint = convertSourcePointToCanvasPoint(identifiedStarMarker.x, identifiedStarMarker.y);
+      const markerDistance = Math.hypot(markerCanvasPoint.x - mouseCanvasX, markerCanvasPoint.y - mouseCanvasY);
+      if (markerDistance > searchRadiusPixels) {
+        return;
+      }
+      if (markerDistance < closestDistance) {
+        closestDistance = markerDistance;
+        closestMarker = identifiedStarMarker;
+      }
+    });
+    return closestMarker;
   }
 
   function drawFrameCenterMarker(drawingContext) {
@@ -1812,6 +2007,105 @@
     }
   }
 
+  async function identifyStarsFromPhoto() {
+    if (!applicationModel.guidingImageBase64) {
+      applicationModel.guidingCorrectionHint = "Load a frame before photo catalog search.";
+      renderGuidingLog();
+      return;
+    }
+
+    const maxStars = Number(guidingPhotoStarsInputElement.value || "6");
+    try {
+      const identifyResponse = await fetch("/api/guiding/catalog/identify-photo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image_data: applicationModel.guidingImageBase64,
+          max_stars: maxStars,
+          max_catalog_matches: 5
+        })
+      });
+      if (!identifyResponse.ok) {
+        throw new Error(await identifyResponse.text());
+      }
+
+      const photoCatalogPayload = await identifyResponse.json();
+      const activeCatalogProvider = String(photoCatalogPayload.catalog_provider || "");
+      const centerStar = photoCatalogPayload.center_star || {};
+      const centerCatalogMatches = Array.isArray(centerStar.catalog_matches) ? centerStar.catalog_matches : [];
+      if (centerCatalogMatches.length === 0) {
+        applicationModel.guidingCorrectionHint = "Photo catalog: no center-star match.";
+        applicationModel.guidingIdentifiedStars = [];
+        applicationModel.guidingCenterObjectName = "";
+        applicationModel.guidingCenterObjectMeta = "";
+        hideGuidingStarTooltip();
+        renderGuidingCanvas();
+        renderGuidingCenterObjectCard();
+        renderGuidingLog();
+        return;
+      }
+
+      const centerBestMatch = centerCatalogMatches[0];
+      const surroundingStars = Array.isArray(photoCatalogPayload.surrounding_stars) ? photoCatalogPayload.surrounding_stars : [];
+      applicationModel.guidingIdentifiedStars = buildIdentifiedStarMarkers(centerStar, surroundingStars);
+      applicationModel.guidingCenterObjectName = centerBestMatch.name;
+      applicationModel.guidingCenterObjectMeta =
+        centerBestMatch.constellation + ", mag " + String(centerBestMatch.visual_magnitude) + ", provider " + activeCatalogProvider;
+      const surroundingDescriptions = surroundingStars.slice(0, 4).map(function mapSurroundingStar(starEntry, starIndex) {
+        const starMatches = Array.isArray(starEntry.catalog_matches) ? starEntry.catalog_matches : [];
+        if (starMatches.length === 0) {
+          return "#" + String(starIndex + 1) + ": unknown";
+        }
+        const bestNearbyMatch = starMatches[0];
+        return "#" + String(starIndex + 1) + ": " + bestNearbyMatch.name + " (" + bestNearbyMatch.constellation + ")";
+      });
+
+      applicationModel.guidingCorrectionHint =
+        "Photo catalog [" + activeCatalogProvider + "]: center≈" + centerBestMatch.name +
+        " (" + centerBestMatch.constellation + "). Nearby: " + surroundingDescriptions.join(", ");
+      renderGuidingCanvas();
+      renderGuidingCenterObjectCard();
+      renderGuidingLog();
+    } catch (identifyError) {
+      applicationModel.guidingCorrectionHint = "Photo catalog search failed: " + String(identifyError);
+      applicationModel.guidingIdentifiedStars = [];
+      applicationModel.guidingCenterObjectName = "";
+      applicationModel.guidingCenterObjectMeta = "";
+      hideGuidingStarTooltip();
+      renderGuidingCanvas();
+      renderGuidingCenterObjectCard();
+      renderGuidingLog();
+    }
+  }
+
+  function buildIdentifiedStarMarkers(centerPhotoStar, surroundingPhotoStars) {
+    const identifiedStarMarkers = [];
+    const centerCatalogMatches = Array.isArray(centerPhotoStar.catalog_matches) ? centerPhotoStar.catalog_matches : [];
+    if (typeof centerPhotoStar.x === "number" && typeof centerPhotoStar.y === "number" && centerCatalogMatches.length > 0) {
+      identifiedStarMarkers.push({
+        x: centerPhotoStar.x,
+        y: centerPhotoStar.y,
+        name: centerCatalogMatches[0].name,
+        isCenterObject: true
+      });
+    }
+
+    surroundingPhotoStars.forEach(function appendSurroundingMarker(surroundingPhotoStar) {
+      const surroundingCatalogMatches = Array.isArray(surroundingPhotoStar.catalog_matches) ? surroundingPhotoStar.catalog_matches : [];
+      if (typeof surroundingPhotoStar.x !== "number" || typeof surroundingPhotoStar.y !== "number" || surroundingCatalogMatches.length === 0) {
+        return;
+      }
+      identifiedStarMarkers.push({
+        x: surroundingPhotoStar.x,
+        y: surroundingPhotoStar.y,
+        name: surroundingCatalogMatches[0].name,
+        isCenterObject: false
+      });
+    });
+
+    return identifiedStarMarkers;
+  }
+
   function renderGuidingLog() {
     const hasTarget = applicationModel.guidingTargetX !== null && applicationModel.guidingTargetY !== null;
     const hasFound = applicationModel.guidingFoundX !== null && applicationModel.guidingFoundY !== null;
@@ -1824,6 +2118,80 @@
       lines.push("Hint: " + applicationModel.guidingCorrectionHint);
     }
     guidingLogElement.textContent = lines.join("\n");
+  }
+
+  function renderGuidingCenterObjectCard() {
+    if (!applicationModel.guidingCenterObjectName) {
+      guidingCenterObjectNameElement.textContent = "Not identified";
+      guidingCenterObjectMetaElement.textContent = "Run Identify center + surrounding to solve the frame.";
+      return;
+    }
+    guidingCenterObjectNameElement.textContent = applicationModel.guidingCenterObjectName;
+    guidingCenterObjectMetaElement.textContent = applicationModel.guidingCenterObjectMeta;
+  }
+
+  function renderGuidingCatalogProviderOptions() {
+    const catalogProviderOptions = applicationModel.guidingCatalogProviders;
+    const existingOptionCount = guidingCatalogProviderSelectElement.options.length;
+    if (existingOptionCount !== catalogProviderOptions.length) {
+      guidingCatalogProviderSelectElement.innerHTML = "";
+      catalogProviderOptions.forEach(function appendCatalogProviderOption(catalogProviderEntry) {
+        const providerOptionElement = document.createElement("option");
+        providerOptionElement.value = catalogProviderEntry.id;
+        providerOptionElement.textContent = catalogProviderEntry.available ? catalogProviderEntry.title : catalogProviderEntry.title + " (not installed)";
+        providerOptionElement.disabled = !catalogProviderEntry.available;
+        guidingCatalogProviderSelectElement.appendChild(providerOptionElement);
+      });
+    }
+    if (applicationModel.guidingActiveCatalogProvider) {
+      guidingCatalogProviderSelectElement.value = applicationModel.guidingActiveCatalogProvider;
+    }
+  }
+
+  function renderGuidingExpandedState() {
+    guidingPanelElement.classList.toggle("expanded", applicationModel.guidingExpandedView);
+    guidingExpandToggleButtonElement.textContent = applicationModel.guidingExpandedView ? "Collapse to window" : "Expand to app";
+  }
+
+  async function loadGuidingCatalogProviders() {
+    try {
+      const providersResponse = await fetch("/api/guiding/catalog/providers");
+      if (!providersResponse.ok) {
+        throw new Error(await providersResponse.text());
+      }
+      const providersPayload = await providersResponse.json();
+      applicationModel.guidingCatalogProviders = Array.isArray(providersPayload.providers) ? providersPayload.providers : [];
+      applicationModel.guidingActiveCatalogProvider = String(providersPayload.active_provider || "");
+      renderGuidingCatalogProviderOptions();
+    } catch (providersError) {
+      applicationModel.errorText = "Catalog provider list failed: " + String(providersError);
+      renderFromModel();
+    }
+  }
+
+  async function setGuidingCatalogProvider(providerID) {
+    if (providerID === "") {
+      return;
+    }
+    try {
+      const setProviderResponse = await fetch("/api/guiding/catalog/active", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider_id: providerID })
+      });
+      if (!setProviderResponse.ok) {
+        throw new Error(await setProviderResponse.text());
+      }
+      const setProviderPayload = await setProviderResponse.json();
+      applicationModel.guidingCatalogProviders = Array.isArray(setProviderPayload.providers) ? setProviderPayload.providers : [];
+      applicationModel.guidingActiveCatalogProvider = String(setProviderPayload.active_provider || "");
+      renderGuidingCatalogProviderOptions();
+      applicationModel.guidingCorrectionHint = "Catalog provider switched to " + applicationModel.guidingActiveCatalogProvider + ".";
+      renderGuidingLog();
+    } catch (setProviderError) {
+      applicationModel.errorText = "Catalog provider switch failed: " + String(setProviderError);
+      renderFromModel();
+    }
   }
 
   function sortAscendingNumbers(leftNumber, rightNumber) {
@@ -2120,6 +2488,7 @@
   }
 
   initializeLocalization().then(function startApplication() {
+    void loadGuidingCatalogProviders();
     requestStateFromServer().then(applyStateFromServer).catch(function handleInitialError(initialError) {
       applicationModel.errorText = String(initialError);
       renderFromModel();

@@ -108,6 +108,16 @@ type guidingCatalogNearestRequest struct {
 	DeclinationDeg     float64 `json:"declination_deg"`
 }
 
+type guidingCatalogPhotoIdentifyRequest struct {
+	ImageData         string `json:"image_data"`
+	MaxStars          int    `json:"max_stars"`
+	MaxCatalogMatches int    `json:"max_catalog_matches"`
+}
+
+type guidingCatalogSetActiveRequest struct {
+	ProviderID string `json:"provider_id"`
+}
+
 type guidingNativeFileResponse struct {
 	FileName string `json:"file_name"`
 	DataURL  string `json:"data_url"`
@@ -246,6 +256,9 @@ func main() {
 	http.HandleFunc("/api/guiding/analyze", handleGuidingAnalyze)
 	http.HandleFunc("/api/guiding/catalog/search", handleGuidingCatalogSearch)
 	http.HandleFunc("/api/guiding/catalog/nearest", handleGuidingCatalogNearest)
+	http.HandleFunc("/api/guiding/catalog/providers", handleGuidingCatalogProviders)
+	http.HandleFunc("/api/guiding/catalog/active", handleGuidingCatalogSetActive)
+	http.HandleFunc("/api/guiding/catalog/identify-photo", handleGuidingCatalogPhotoIdentify)
 	http.HandleFunc("/api/guiding/native-open-image", handleGuidingNativeImageOpen)
 	http.HandleFunc("/", handleRequest)
 
@@ -1584,6 +1597,74 @@ func handleGuidingCatalogNearest(writer http.ResponseWriter, request *http.Reque
 	}
 
 	writeJSON(writer, guiding.FindNearestStar(nearestRequest.RightAscensionHour, nearestRequest.DeclinationDeg))
+}
+
+func handleGuidingCatalogProviders(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		writeJSONError(writer, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	writeJSON(writer, map[string]any{
+		"active_provider": guiding.ActiveCatalogProvider().ID,
+		"providers":       guiding.ListCatalogProviders(),
+	})
+}
+
+func handleGuidingCatalogSetActive(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		writeJSONError(writer, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var setActiveRequest guidingCatalogSetActiveRequest
+	if err := json.NewDecoder(request.Body).Decode(&setActiveRequest); err != nil {
+		writeJSONError(writer, http.StatusBadRequest, "invalid set-active payload")
+		return
+	}
+
+	if err := guiding.SetActiveCatalogProvider(setActiveRequest.ProviderID); err != nil {
+		writeJSONError(writer, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(writer, map[string]any{
+		"active_provider": guiding.ActiveCatalogProvider().ID,
+		"providers":       guiding.ListCatalogProviders(),
+	})
+}
+
+func handleGuidingCatalogPhotoIdentify(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		writeJSONError(writer, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var identifyRequest guidingCatalogPhotoIdentifyRequest
+	if err := json.NewDecoder(request.Body).Decode(&identifyRequest); err != nil {
+		writeJSONError(writer, http.StatusBadRequest, "invalid photo-identify payload")
+		return
+	}
+
+	decodedImageBytes, err := decodeBase64ImagePayload(identifyRequest.ImageData)
+	if err != nil {
+		writeJSONError(writer, http.StatusBadRequest, "invalid image payload")
+		return
+	}
+
+	decodedFrame, _, err := image.Decode(bytes.NewReader(decodedImageBytes))
+	if err != nil {
+		writeJSONError(writer, http.StatusBadRequest, "unsupported image format")
+		return
+	}
+
+	identifiedStars, err := guiding.IdentifyStarsFromPhoto(decodedFrame, identifyRequest.MaxStars, identifyRequest.MaxCatalogMatches)
+	if err != nil {
+		writeJSONError(writer, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(writer, identifiedStars)
 }
 
 func handleGuidingNativeImageOpen(writer http.ResponseWriter, request *http.Request) {
