@@ -523,6 +523,24 @@
       color: #c5d3f1;
       line-height: 1.35;
     }
+    .guiding-star-tooltip {
+      position: fixed;
+      z-index: 2200;
+      pointer-events: none;
+      border: 1px solid #3b82f6;
+      border-radius: 6px;
+      background: rgba(2, 6, 23, 0.94);
+      color: #e2e8f0;
+      padding: 4px 6px;
+      font-size: 11px;
+      line-height: 1.2;
+      opacity: 0;
+      transform: translate3d(0, 0, 0);
+      transition: opacity 100ms ease;
+    }
+    .guiding-star-tooltip.visible {
+      opacity: 1;
+    }
   </style>
 </head>
 <body>
@@ -610,6 +628,7 @@
 </main>
 </div>
 <div id="port-hover-tooltip" class="port-hover-tooltip"></div>
+<div id="guiding-star-tooltip" class="guiding-star-tooltip"></div>
 
 <script>
   const applicationModel = {
@@ -694,6 +713,7 @@
   const guidingCenterObjectNameElement = document.getElementById("guiding-center-object-name");
   const guidingCenterObjectMetaElement = document.getElementById("guiding-center-object-meta");
   const guidingLogElement = document.getElementById("guiding-log");
+  const guidingStarTooltipElement = document.getElementById("guiding-star-tooltip");
   const controlChannelSocketsByChannel = {};
   let outputControlRequestSequence = 1;
 
@@ -805,9 +825,16 @@
     applicationModel.guidingCenterObjectName = "";
     applicationModel.guidingCenterObjectMeta = "";
     applicationModel.guidingCorrectionHint = "Target selected. Run Analyze frame.";
+    hideGuidingStarTooltip();
     renderGuidingCanvas();
     renderGuidingLog();
     renderGuidingCenterObjectCard();
+  });
+  guidingCanvasElement.addEventListener("mousemove", function handleGuidingCanvasMouseMove(mouseEvent) {
+    renderGuidingStarTooltip(mouseEvent);
+  });
+  guidingCanvasElement.addEventListener("mouseleave", function handleGuidingCanvasMouseLeave() {
+    hideGuidingStarTooltip();
   });
   guidingImageFileInputElement.addEventListener("change", function handleGuidingImageSelection() {
     const selectedImageFile = guidingImageFileInputElement.files && guidingImageFileInputElement.files[0];
@@ -836,6 +863,7 @@
     applicationModel.guidingCenterObjectName = "";
     applicationModel.guidingCenterObjectMeta = "";
     applicationModel.guidingCorrectionHint = "Target selection was reset.";
+    hideGuidingStarTooltip();
     renderGuidingCanvas();
     renderGuidingLog();
     renderGuidingCenterObjectCard();
@@ -1707,6 +1735,7 @@
     applicationModel.guidingCenterObjectName = "";
     applicationModel.guidingCenterObjectMeta = "";
     applicationModel.guidingCorrectionHint = "Frame loaded. Click a star to set guide target.";
+    hideGuidingStarTooltip();
     renderGuidingCanvas();
     renderGuidingLog();
     renderGuidingCenterObjectCard();
@@ -1741,6 +1770,7 @@
     drawingContext.fillRect(0, 0, guidingCanvasElement.width, guidingCanvasElement.height);
 
     if (!applicationModel.guidingImageElement) {
+      hideGuidingStarTooltip();
       drawingContext.fillStyle = "#93c5fd";
       drawingContext.font = "16px Segoe UI";
       drawingContext.fillText("No guiding frame loaded.", 20, 36);
@@ -1769,6 +1799,48 @@
       drawingContext.fillStyle = identifiedStarMarker.isCenterObject ? "#ddd6fe" : "#e0f2fe";
       drawingContext.fillText(identifiedStarMarker.name, canvasPoint.x + 10, canvasPoint.y - 2);
     });
+  }
+
+  function renderGuidingStarTooltip(mouseEvent) {
+    if (applicationModel.guidingIdentifiedStars.length === 0 || !applicationModel.guidingImageElement) {
+      hideGuidingStarTooltip();
+      return;
+    }
+
+    const canvasRectangle = guidingCanvasElement.getBoundingClientRect();
+    const mouseCanvasX = mouseEvent.clientX - canvasRectangle.left;
+    const mouseCanvasY = mouseEvent.clientY - canvasRectangle.top;
+    const hoveredMarker = findClosestGuidingMarker(mouseCanvasX, mouseCanvasY, 14);
+    if (!hoveredMarker) {
+      hideGuidingStarTooltip();
+      return;
+    }
+
+    guidingStarTooltipElement.textContent = hoveredMarker.name;
+    guidingStarTooltipElement.style.left = String(mouseEvent.clientX + 12) + "px";
+    guidingStarTooltipElement.style.top = String(mouseEvent.clientY + 10) + "px";
+    guidingStarTooltipElement.classList.add("visible");
+  }
+
+  function hideGuidingStarTooltip() {
+    guidingStarTooltipElement.classList.remove("visible");
+  }
+
+  function findClosestGuidingMarker(mouseCanvasX, mouseCanvasY, searchRadiusPixels) {
+    let closestMarker = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    applicationModel.guidingIdentifiedStars.forEach(function scanMarker(identifiedStarMarker) {
+      const markerCanvasPoint = convertSourcePointToCanvasPoint(identifiedStarMarker.x, identifiedStarMarker.y);
+      const markerDistance = Math.hypot(markerCanvasPoint.x - mouseCanvasX, markerCanvasPoint.y - mouseCanvasY);
+      if (markerDistance > searchRadiusPixels) {
+        return;
+      }
+      if (markerDistance < closestDistance) {
+        closestDistance = markerDistance;
+        closestMarker = identifiedStarMarker;
+      }
+    });
+    return closestMarker;
   }
 
   function drawFrameCenterMarker(drawingContext) {
@@ -1919,6 +1991,7 @@
         applicationModel.guidingIdentifiedStars = [];
         applicationModel.guidingCenterObjectName = "";
         applicationModel.guidingCenterObjectMeta = "";
+        hideGuidingStarTooltip();
         renderGuidingCanvas();
         renderGuidingCenterObjectCard();
         renderGuidingLog();
@@ -1951,6 +2024,7 @@
       applicationModel.guidingIdentifiedStars = [];
       applicationModel.guidingCenterObjectName = "";
       applicationModel.guidingCenterObjectMeta = "";
+      hideGuidingStarTooltip();
       renderGuidingCanvas();
       renderGuidingCenterObjectCard();
       renderGuidingLog();

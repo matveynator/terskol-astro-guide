@@ -59,6 +59,9 @@ type catalogAlignment struct {
 	centerCandidate    StarCatalogEntry
 	surroundingMatches map[int]StarCatalogEntry
 	errorByDetected    map[int]float64
+	scale              float64
+	rotationRadians    float64
+	centerVector       vector2
 }
 
 // IdentifyStarsFromPhoto detects bright stars and solves the center-of-frame direction
@@ -91,14 +94,12 @@ func IdentifyStarsFromPhoto(frame image.Image, maxStars int, maxCatalogMatches i
 		return PhotoCatalogResult{}, errors.New("failed to match star pattern with catalog")
 	}
 
+	primaryMatchesByDetectedIndex, predictedOffsetsByDetectedIndex := assignUniqueCatalogMatchesForDetectedStars(detectedStars, alignment)
 	for detectedIndex := range detectedStars {
-		primaryMatch, hasPrimaryMatch := alignment.surroundingMatches[detectedIndex]
-		if detectedIndex == 0 {
-			primaryMatch = alignment.centerCandidate
-			hasPrimaryMatch = true
-		}
-		predictedError := alignment.errorByDetected[detectedIndex]
-		detectedStars[detectedIndex].CatalogMatches = buildCatalogMatchesForDetectedStar(detectedStars[detectedIndex], alignment.centerCandidate, primaryMatch, hasPrimaryMatch, predictedError, maxCatalogMatches)
+		primaryMatch, hasPrimaryMatch := primaryMatchesByDetectedIndex[detectedIndex]
+		primaryError := alignment.errorByDetected[detectedIndex]
+		predictedOffset := predictedOffsetsByDetectedIndex[detectedIndex]
+		detectedStars[detectedIndex].CatalogMatches = buildCatalogMatchesForDetectedStar(detectedStars[detectedIndex], alignment.centerCandidate, primaryMatch, hasPrimaryMatch, primaryError, predictedOffset, maxCatalogMatches)
 	}
 
 	return PhotoCatalogResult{
@@ -175,6 +176,9 @@ func solveCatalogAlignment(detectedStars []DetectedPhotoStar) catalogAlignment {
 						centerCandidate:    centerCandidate,
 						surroundingMatches: matchedCatalogByDetectedIndex,
 						errorByDetected:    errorByDetectedIndex,
+						scale:              scale,
+						rotationRadians:    rotationRadians,
+						centerVector:       centerVector,
 					}
 				}
 			}
@@ -232,7 +236,7 @@ func scoreAlignmentHypothesis(centerCandidate StarCatalogEntry, neighborCandidat
 	return score, matchedCatalogByDetectedIndex, errorByDetectedIndex
 }
 
-func buildCatalogMatchesForDetectedStar(detectedStar DetectedPhotoStar, centerCandidate StarCatalogEntry, primaryMatch StarCatalogEntry, hasPrimaryMatch bool, primaryError float64, maxMatches int) []CatalogMatch {
+func buildCatalogMatchesForDetectedStar(detectedStar DetectedPhotoStar, centerCandidate StarCatalogEntry, primaryMatch StarCatalogEntry, hasPrimaryMatch bool, primaryError float64, predictedOffset vector2, maxMatches int) []CatalogMatch {
 	maxMatches = clampInt(maxMatches, minimumCatalogMatchesPerStar, maximumCatalogMatchesPerStar)
 	if maxMatches == 0 {
 		maxMatches = defaultCatalogMatchesPerStar
@@ -255,12 +259,13 @@ func buildCatalogMatchesForDetectedStar(detectedStar DetectedPhotoStar, centerCa
 			continue
 		}
 		catalogEntryOffset := catalogOffsetVector(centerCandidate, catalogEntry)
+		offsetError := vectorLength(subtractVectors(catalogEntryOffset, predictedOffset))
 		matches = append(matches, CatalogMatch{
 			Name:            catalogEntry.Name,
 			Constellation:   catalogEntry.Constellation,
 			VisualMagnitude: catalogEntry.VisualMagnitude,
 			MagnitudeDelta:  math.Abs(catalogEntry.VisualMagnitude - estimatedMagnitude),
-			AngularErrorDeg: vectorLength(catalogEntryOffset),
+			AngularErrorDeg: offsetError,
 		})
 	}
 
@@ -288,6 +293,56 @@ func collectCatalogNeighbors(centerCandidate StarCatalogEntry, catalogEntries []
 		}
 	}
 	return neighbors
+}
+
+func assignUniqueCatalogMatchesForDetectedStars(detectedStars []DetectedPhotoStar, alignment catalogAlignment) (map[int]StarCatalogEntry, map[int]vector2) {
+	primaryMatchesByDetectedIndex := make(map[int]StarCatalogEntry)
+	predictedOffsetsByDetectedIndex := make(map[int]vector2)
+	usedCatalogNames := map[string]bool{}
+	primaryMatchesByDetectedIndex[0] = alignment.centerCandidate
+	usedCatalogNames[alignment.centerCandidate.Name] = true
+	predictedOffsetsByDetectedIndex[0] = vector2{x: 0, y: 0}
+
+	detectedIndexes := make([]int, 0, len(detectedStars)-1)
+	for detectedIndex := 1; detectedIndex < len(detectedStars); detectedIndex += 1 {
+		detectedIndexes = append(detectedIndexes, detectedIndex)
+	}
+	sort.Slice(detectedIndexes, func(left int, right int) bool {
+		return detectedStars[detectedIndexes[left]].DistanceToCenter > detectedStars[detectedIndexes[right]].DistanceToCenter
+	})
+
+	catalogEntries := ActiveCatalogProvider().Entries
+	for _, detectedIndex := range detectedIndexes {
+		detectedOffsetVector := vectorFromPoints(alignment.centerVector, vector2{x: detectedStars[detectedIndex].X, y: detectedStars[detectedIndex].Y})
+		predictedOffset := rotateVector(scaleVector(detectedOffsetVector, alignment.scale), alignment.rotationRadians)
+		predictedOffsetsByDetectedIndex[detectedIndex] = predictedOffset
+		estimatedMagnitude := estimateVisualMagnitude(detectedStars[detectedIndex].Brightness)
+
+		bestCatalogEntry := StarCatalogEntry{}
+		bestCatalogScore := math.Inf(1)
+		for _, catalogEntry := range catalogEntries {
+			if usedCatalogNames[catalogEntry.Name] {
+				continue
+			}
+			catalogOffset := catalogOffsetVector(alignment.centerCandidate, catalogEntry)
+			offsetError := vectorLength(subtractVectors(catalogOffset, predictedOffset))
+			magnitudeError := math.Abs(catalogEntry.VisualMagnitude - estimatedMagnitude)
+			catalogScore := offsetError + (0.35 * magnitudeError)
+			if catalogScore < bestCatalogScore {
+				bestCatalogScore = catalogScore
+				bestCatalogEntry = catalogEntry
+			}
+		}
+
+		if bestCatalogEntry.Name == "" {
+			continue
+		}
+		primaryMatchesByDetectedIndex[detectedIndex] = bestCatalogEntry
+		usedCatalogNames[bestCatalogEntry.Name] = true
+		alignment.errorByDetected[detectedIndex] = bestCatalogScore
+	}
+
+	return primaryMatchesByDetectedIndex, predictedOffsetsByDetectedIndex
 }
 
 func catalogOffsetVector(centerCandidate StarCatalogEntry, otherEntry StarCatalogEntry) vector2 {
@@ -377,26 +432,51 @@ func selectBrightCandidates(candidates []rawPhotoStar, maxStars int, frameWidth 
 		}
 	}
 
+	if len(candidates) == 0 {
+		return nil
+	}
+	candidateWindowLimit := clampInt(maxStars*30, maxStars, len(candidates))
+	limitedCandidates := candidates[:candidateWindowLimit]
 	selected := make([]rawPhotoStar, 0, maxStars)
-	for _, candidate := range candidates {
-		if len(selected) >= maxStars {
-			break
-		}
-		isTooCloseToAnotherStar := false
-		for _, acceptedCandidate := range selected {
-			distance := math.Hypot(float64(candidate.x-acceptedCandidate.x), float64(candidate.y-acceptedCandidate.y))
-			if distance < minimumSeparation {
-				isTooCloseToAnotherStar = true
-				break
+	selected = append(selected, limitedCandidates[0])
+	for len(selected) < maxStars {
+		bestCandidateIndex := -1
+		bestCandidateDistanceScore := -1.0
+		for candidateIndex, candidate := range limitedCandidates {
+			if containsRawPhotoStar(selected, candidate) {
+				continue
+			}
+			minimumDistanceToSelected := math.Inf(1)
+			for _, acceptedCandidate := range selected {
+				distance := math.Hypot(float64(candidate.x-acceptedCandidate.x), float64(candidate.y-acceptedCandidate.y))
+				if distance < minimumDistanceToSelected {
+					minimumDistanceToSelected = distance
+				}
+			}
+			if minimumDistanceToSelected < minimumSeparation {
+				continue
+			}
+			if minimumDistanceToSelected > bestCandidateDistanceScore {
+				bestCandidateDistanceScore = minimumDistanceToSelected
+				bestCandidateIndex = candidateIndex
 			}
 		}
-		if isTooCloseToAnotherStar {
-			continue
+		if bestCandidateIndex < 0 {
+			break
 		}
-		selected = append(selected, candidate)
+		selected = append(selected, limitedCandidates[bestCandidateIndex])
 	}
 
 	return selected
+}
+
+func containsRawPhotoStar(selectedCandidates []rawPhotoStar, candidate rawPhotoStar) bool {
+	for _, selectedCandidate := range selectedCandidates {
+		if selectedCandidate.x == candidate.x && selectedCandidate.y == candidate.y {
+			return true
+		}
+	}
+	return false
 }
 
 func estimateVisualMagnitude(starBrightness float64) float64 {
