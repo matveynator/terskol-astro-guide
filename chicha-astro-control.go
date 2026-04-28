@@ -118,6 +118,19 @@ type guidingCatalogSetActiveRequest struct {
 	ProviderID string `json:"provider_id"`
 }
 
+type guidingLiveStartRequest struct {
+	ReferenceImageData string  `json:"reference_image_data"`
+	MaxStars           int     `json:"max_stars"`
+	MatrixA            float64 `json:"matrix_a"`
+	MatrixB            float64 `json:"matrix_b"`
+	MatrixC            float64 `json:"matrix_c"`
+	MatrixD            float64 `json:"matrix_d"`
+}
+
+type guidingLiveFrameRequest struct {
+	ImageData string `json:"image_data"`
+}
+
 type guidingNativeFileResponse struct {
 	FileName string `json:"file_name"`
 	DataURL  string `json:"data_url"`
@@ -234,6 +247,7 @@ func main() {
 	runtimeStateData := buildRuntimeStateForUI(runtimeMode, loadedSettings.DLLOverridePath)
 
 	outputPWMController := startPWMController(hotSwapAdapter, defaultPWMFrequency)
+	liveGuidingTracker := guiding.StartLiveTracker()
 	go runStateOwner(
 		stateCommands,
 		hotSwapAdapter,
@@ -259,6 +273,9 @@ func main() {
 	http.HandleFunc("/api/guiding/catalog/providers", handleGuidingCatalogProviders)
 	http.HandleFunc("/api/guiding/catalog/active", handleGuidingCatalogSetActive)
 	http.HandleFunc("/api/guiding/catalog/identify-photo", handleGuidingCatalogPhotoIdentify)
+	http.HandleFunc("/api/guiding/live/start", handleGuidingLiveStart(liveGuidingTracker))
+	http.HandleFunc("/api/guiding/live/frame", handleGuidingLiveFrame(liveGuidingTracker))
+	http.HandleFunc("/api/guiding/live/state", handleGuidingLiveState(liveGuidingTracker))
 	http.HandleFunc("/api/guiding/native-open-image", handleGuidingNativeImageOpen)
 	http.HandleFunc("/", handleRequest)
 
@@ -1544,13 +1561,7 @@ func handleGuidingAnalyze(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	decodedImageBytes, err := decodeBase64ImagePayload(analyzeRequest.ImageData)
-	if err != nil {
-		writeJSONError(writer, http.StatusBadRequest, "invalid image payload")
-		return
-	}
-
-	decodedFrame, _, err := image.Decode(bytes.NewReader(decodedImageBytes))
+	decodedFrame, err := decodeFrameFromBase64ImagePayload(analyzeRequest.ImageData)
 	if err != nil {
 		writeJSONError(writer, http.StatusBadRequest, "unsupported image format")
 		return
@@ -1567,6 +1578,83 @@ func handleGuidingAnalyze(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	writeJSON(writer, analyzeResult)
+}
+
+func handleGuidingLiveStart(liveTracker *guiding.LiveTracker) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			writeJSONError(writer, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		var startRequest guidingLiveStartRequest
+		if err := json.NewDecoder(request.Body).Decode(&startRequest); err != nil {
+			writeJSONError(writer, http.StatusBadRequest, "invalid live-start payload")
+			return
+		}
+
+		referenceFrame, err := decodeFrameFromBase64ImagePayload(startRequest.ReferenceImageData)
+		if err != nil {
+			writeJSONError(writer, http.StatusBadRequest, "invalid reference image payload")
+			return
+		}
+
+		snapshot, err := liveTracker.StartSession(guiding.LiveTrackerSessionConfig{
+			ReferenceFrame: referenceFrame,
+			MaxStars:       startRequest.MaxStars,
+			PixelToMotor: guiding.PixelToMotorMatrix{
+				A: startRequest.MatrixA,
+				B: startRequest.MatrixB,
+				C: startRequest.MatrixC,
+				D: startRequest.MatrixD,
+			},
+		})
+		if err != nil {
+			writeJSONError(writer, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		writeJSON(writer, snapshot)
+	}
+}
+
+func handleGuidingLiveFrame(liveTracker *guiding.LiveTracker) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			writeJSONError(writer, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		var frameRequest guidingLiveFrameRequest
+		if err := json.NewDecoder(request.Body).Decode(&frameRequest); err != nil {
+			writeJSONError(writer, http.StatusBadRequest, "invalid live-frame payload")
+			return
+		}
+
+		frame, err := decodeFrameFromBase64ImagePayload(frameRequest.ImageData)
+		if err != nil {
+			writeJSONError(writer, http.StatusBadRequest, "invalid frame image payload")
+			return
+		}
+
+		snapshot, frameError := liveTracker.AnalyzeFrame(frame)
+		if frameError != nil {
+			writeJSONError(writer, http.StatusBadRequest, frameError.Error())
+			return
+		}
+		writeJSON(writer, snapshot)
+	}
+}
+
+func handleGuidingLiveState(liveTracker *guiding.LiveTracker) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet {
+			writeJSONError(writer, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		writeJSON(writer, liveTracker.Snapshot())
+	}
 }
 
 func handleGuidingCatalogSearch(writer http.ResponseWriter, request *http.Request) {
@@ -1745,6 +1833,19 @@ func decodeBase64ImagePayload(imagePayload string) ([]byte, error) {
 	}
 
 	return base64.RawStdEncoding.DecodeString(base64Payload)
+}
+
+func decodeFrameFromBase64ImagePayload(imagePayload string) (image.Image, error) {
+	decodedImageBytes, err := decodeBase64ImagePayload(imagePayload)
+	if err != nil {
+		return nil, err
+	}
+
+	decodedFrame, _, err := image.Decode(bytes.NewReader(decodedImageBytes))
+	if err != nil {
+		return nil, err
+	}
+	return decodedFrame, nil
 }
 
 func saveUploadedDLLFile(uploadedDLL io.Reader, originalFilename string) (string, error) {
