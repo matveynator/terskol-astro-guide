@@ -600,8 +600,13 @@
         Frame image
         <input id="guiding-image-file-input" type="file" accept="image/*">
       </label>
+      <label class="guiding-field">
+        Reference frame image (step 1)
+        <input id="guiding-reference-image-file-input" type="file" accept="image/*">
+      </label>
       <div class="guiding-row">
         <button id="guiding-analyze-button" type="button">Analyze frame</button>
+        <button id="guiding-analyze-shift-button" type="button">Analyze two-frame shift</button>
         <button id="guiding-reset-target-button" type="button">Reset target</button>
       </div>
       <div class="guiding-row">
@@ -711,6 +716,7 @@
     lastRenderedCountdownSecondByChannel: {},
     guidingImageElement: null,
     guidingImageBase64: "",
+    guidingReferenceImageBase64: "",
     guidingTargetX: null,
     guidingTargetY: null,
     guidingFoundX: null,
@@ -730,7 +736,10 @@
     guidingLiveOperatorSummary: "",
     guidingLiveAutoEnabled: false,
     guidingLiveAutoMaxPulseMs: 120,
-    guidingLiveAutoDispatchMessage: ""
+    guidingLiveAutoDispatchMessage: "",
+    guidingReferenceStars: [],
+    guidingCurrentStars: [],
+    guidingFrameShiftResultSummary: ""
   };
   const outputMaxVoltage = 3.3;
   const defaultLanguageCode = "en";
@@ -767,7 +776,9 @@
   const guidingCanvasElement = document.getElementById("guiding-canvas");
   const guidingPanelElement = document.getElementById("guiding-panel");
   const guidingImageFileInputElement = document.getElementById("guiding-image-file-input");
+  const guidingReferenceImageFileInputElement = document.getElementById("guiding-reference-image-file-input");
   const guidingAnalyzeButtonElement = document.getElementById("guiding-analyze-button");
+  const guidingAnalyzeShiftButtonElement = document.getElementById("guiding-analyze-shift-button");
   const guidingResetTargetButtonElement = document.getElementById("guiding-reset-target-button");
   const guidingExpandToggleButtonElement = document.getElementById("guiding-expand-toggle-button");
   const guidingSearchRadiusInputElement = document.getElementById("guiding-search-radius-input");
@@ -915,6 +926,13 @@
     }
     void loadGuidingFrameFromFile(selectedImageFile);
   });
+  guidingReferenceImageFileInputElement.addEventListener("change", function handleGuidingReferenceImageSelection() {
+    const selectedReferenceImageFile = guidingReferenceImageFileInputElement.files && guidingReferenceImageFileInputElement.files[0];
+    if (!selectedReferenceImageFile) {
+      return;
+    }
+    void loadGuidingReferenceFrameFromFile(selectedReferenceImageFile);
+  });
   guidingImageFileInputElement.addEventListener("click", function handleGuidingFileInputClick(clickEvent) {
     if (!isMacOSPlatform()) {
       return;
@@ -925,6 +943,9 @@
   });
   guidingAnalyzeButtonElement.addEventListener("click", function handleAnalyzeButtonClick() {
     void analyzeGuidingFrame();
+  });
+  guidingAnalyzeShiftButtonElement.addEventListener("click", function handleAnalyzeShiftButtonClick() {
+    void analyzeGuidingFrameShift();
   });
   guidingExpandToggleButtonElement.addEventListener("click", function handleGuidingExpandToggleClick() {
     applicationModel.guidingExpandedView = !applicationModel.guidingExpandedView;
@@ -1801,6 +1822,22 @@
     await loadGuidingFrameFromDataURL(loadedDataURL);
   }
 
+  async function loadGuidingReferenceFrameFromFile(selectedReferenceImageFile) {
+    const fileReader = new FileReader();
+    const loadedDataURL = await new Promise(function resolveWhenLoaded(resolve, reject) {
+      fileReader.addEventListener("load", function handleLoaded() {
+        resolve(String(fileReader.result || ""));
+      });
+      fileReader.addEventListener("error", function handleLoadError() {
+        reject(new Error("Failed to load selected reference frame."));
+      });
+      fileReader.readAsDataURL(selectedReferenceImageFile);
+    });
+    applicationModel.guidingReferenceImageBase64 = loadedDataURL;
+    applicationModel.guidingCorrectionHint = "Reference frame loaded for step-1 two-frame analysis.";
+    renderGuidingLog();
+  }
+
   async function loadGuidingFrameViaNativeMacOSPicker() {
     await runServerCommand(async function loadNativeGuidingFrameCommand() {
       const nativePickerResponse = await fetch("/api/guiding/native-open-image", {
@@ -1875,8 +1912,28 @@
     drawingContext.drawImage(applicationModel.guidingImageElement, 0, 0, guidingCanvasElement.width, guidingCanvasElement.height);
     drawFrameCenterMarker(drawingContext);
     drawIdentifiedStarMarkers(drawingContext);
+    drawGuideStarPreviewMarkers(drawingContext);
     drawGuidingTargetMarker(drawingContext);
     drawGuidingFoundMarker(drawingContext);
+  }
+
+  function drawGuideStarPreviewMarkers(drawingContext) {
+    applicationModel.guidingReferenceStars.forEach(function drawReferenceGuideStar(referenceGuideStar) {
+      const canvasPoint = convertSourcePointToCanvasPoint(referenceGuideStar.x, referenceGuideStar.y);
+      drawingContext.strokeStyle = "#ef4444";
+      drawingContext.lineWidth = 1.1;
+      drawingContext.beginPath();
+      drawingContext.arc(canvasPoint.x, canvasPoint.y, 6, 0, Math.PI * 2);
+      drawingContext.stroke();
+    });
+    applicationModel.guidingCurrentStars.forEach(function drawCurrentGuideStar(currentGuideStar) {
+      const canvasPoint = convertSourcePointToCanvasPoint(currentGuideStar.x, currentGuideStar.y);
+      drawingContext.strokeStyle = "#10b981";
+      drawingContext.lineWidth = 1.1;
+      drawingContext.beginPath();
+      drawingContext.arc(canvasPoint.x, canvasPoint.y, 4, 0, Math.PI * 2);
+      drawingContext.stroke();
+    });
   }
 
   function drawIdentifiedStarMarkers(drawingContext) {
@@ -2019,6 +2076,46 @@
       renderGuidingLog();
     } catch (analysisError) {
       applicationModel.guidingCorrectionHint = "Analyze failed: " + String(analysisError);
+      renderGuidingLog();
+    }
+  }
+
+  async function analyzeGuidingFrameShift() {
+    if (!applicationModel.guidingReferenceImageBase64 || !applicationModel.guidingImageBase64) {
+      applicationModel.guidingCorrectionHint = "Load both reference and current frame before two-frame analysis.";
+      renderGuidingLog();
+      return;
+    }
+
+    try {
+      const frameShiftResponse = await fetch("/api/guiding/frame-shift", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reference_image_data: applicationModel.guidingReferenceImageBase64,
+          current_image_data: applicationModel.guidingImageBase64,
+          max_stars: Number(guidingPhotoStarsInputElement.value || "20"),
+          matrix_a: 40, matrix_b: 0, matrix_c: 0, matrix_d: 40
+        })
+      });
+      if (!frameShiftResponse.ok) {
+        throw new Error(await frameShiftResponse.text());
+      }
+
+      const frameShiftPayload = await frameShiftResponse.json();
+      applicationModel.guidingReferenceStars = Array.isArray(frameShiftPayload.reference_guide_stars) ? frameShiftPayload.reference_guide_stars : [];
+      applicationModel.guidingCurrentStars = Array.isArray(frameShiftPayload.current_guide_stars) ? frameShiftPayload.current_guide_stars : [];
+      applicationModel.guidingConfidence = Number(frameShiftPayload.confidence || 0);
+      applicationModel.guidingFrameShiftResultSummary =
+        "dx=" + Number(frameShiftPayload.delta_x || 0).toFixed(2) +
+        ", dy=" + Number(frameShiftPayload.delta_y || 0).toFixed(2) +
+        ", rot=" + Number(frameShiftPayload.rotation_deg || 0).toFixed(3) +
+        " deg, matched=" + String(frameShiftPayload.matched_stars || 0);
+      applicationModel.guidingCorrectionHint = "Two-frame shift solved.";
+      renderGuidingCanvas();
+      renderGuidingLog();
+    } catch (frameShiftError) {
+      applicationModel.guidingCorrectionHint = "Two-frame analysis failed: " + String(frameShiftError);
       renderGuidingLog();
     }
   }
@@ -2311,6 +2408,11 @@
     }
     if (applicationModel.guidingCorrectionHint) {
       lines.push("Hint: " + applicationModel.guidingCorrectionHint);
+    }
+    if (applicationModel.guidingFrameShiftResultSummary) {
+      lines.push("Step-1 result: " + applicationModel.guidingFrameShiftResultSummary);
+      lines.push("Reference stars detected: " + String(applicationModel.guidingReferenceStars.length));
+      lines.push("Current stars detected: " + String(applicationModel.guidingCurrentStars.length));
     }
     guidingLogElement.textContent = lines.join("\n");
   }

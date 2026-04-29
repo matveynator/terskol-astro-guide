@@ -32,15 +32,23 @@ type PixelToMotorMatrix struct {
 }
 
 type FrameShiftResult struct {
-	ReferenceStars int                `json:"reference_stars"`
-	CurrentStars   int                `json:"current_stars"`
-	MatchedStars   int                `json:"matched_stars"`
-	DeltaX         float64            `json:"delta_x"`
-	DeltaY         float64            `json:"delta_y"`
-	RotationDeg    float64            `json:"rotation_deg"`
-	Confidence     float64            `json:"confidence"`
-	ResidualRMS    float64            `json:"residual_rms"`
-	SuggestedMotor SuggestedMotorHint `json:"suggested_motor"`
+	ReferenceStars      int                `json:"reference_stars"`
+	CurrentStars        int                `json:"current_stars"`
+	MatchedStars        int                `json:"matched_stars"`
+	ReferenceGuideStars []GuideStarPreview `json:"reference_guide_stars"`
+	CurrentGuideStars   []GuideStarPreview `json:"current_guide_stars"`
+	DeltaX              float64            `json:"delta_x"`
+	DeltaY              float64            `json:"delta_y"`
+	RotationDeg         float64            `json:"rotation_deg"`
+	Confidence          float64            `json:"confidence"`
+	ResidualRMS         float64            `json:"residual_rms"`
+	SuggestedMotor      SuggestedMotorHint `json:"suggested_motor"`
+}
+
+type GuideStarPreview struct {
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+	Brightness float64 `json:"brightness"`
 }
 
 type SuggestedMotorHint struct {
@@ -113,16 +121,35 @@ func AnalyzeFrameShift(request FrameShiftRequest) (FrameShiftResult, error) {
 	}
 
 	return FrameShiftResult{
-		ReferenceStars: len(referenceStars),
-		CurrentStars:   len(currentStars),
-		MatchedStars:   len(matchedPairs),
-		DeltaX:         deltaX,
-		DeltaY:         deltaY,
-		RotationDeg:    rotationRadians * 180 / math.Pi,
-		Confidence:     confidence,
-		ResidualRMS:    residualRMS,
-		SuggestedMotor: suggestedMotor,
+		ReferenceStars:      len(referenceStars),
+		CurrentStars:        len(currentStars),
+		MatchedStars:        len(matchedPairs),
+		ReferenceGuideStars: buildGuideStarPreviewList(referenceStars, 24),
+		CurrentGuideStars:   buildGuideStarPreviewList(currentStars, 24),
+		DeltaX:              deltaX,
+		DeltaY:              deltaY,
+		RotationDeg:         rotationRadians * 180 / math.Pi,
+		Confidence:          confidence,
+		ResidualRMS:         residualRMS,
+		SuggestedMotor:      suggestedMotor,
 	}, nil
+}
+
+func buildGuideStarPreviewList(stars []guideStar, maxPreviewCount int) []GuideStarPreview {
+	previewCount := len(stars)
+	if previewCount > maxPreviewCount {
+		previewCount = maxPreviewCount
+	}
+
+	previews := make([]GuideStarPreview, 0, previewCount)
+	for previewIndex := 0; previewIndex < previewCount; previewIndex += 1 {
+		previews = append(previews, GuideStarPreview{
+			X:          stars[previewIndex].x,
+			Y:          stars[previewIndex].y,
+			Brightness: stars[previewIndex].brightness,
+		})
+	}
+	return previews
 }
 
 func detectGuideStars(frame image.Image, maxStars int) []guideStar {
