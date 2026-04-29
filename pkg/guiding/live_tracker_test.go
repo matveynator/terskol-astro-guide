@@ -27,6 +27,17 @@ func TestLiveTrackerSessionLifecycle(t *testing.T) {
 	if startSnapshot.ProcessedFrames != 0 {
 		t.Fatalf("expected no processed frames right after start")
 	}
+	if startSnapshot.AutoPulseConfig.Enabled {
+		t.Fatalf("expected auto pulse to be disabled after start")
+	}
+
+	autoSnapshot, autoConfigError := tracker.SetAutoPulseConfig(AutoPulseConfig{Enabled: true, MaxPulseMs: 100})
+	if autoConfigError != nil {
+		t.Fatalf("expected auto config to succeed, got %v", autoConfigError)
+	}
+	if !autoSnapshot.AutoPulseConfig.Enabled {
+		t.Fatalf("expected auto pulse enabled in snapshot")
+	}
 
 	firstSnapshot, firstError := tracker.AnalyzeFrame(firstLiveFrame)
 	if firstError != nil {
@@ -40,6 +51,9 @@ func TestLiveTrackerSessionLifecycle(t *testing.T) {
 	}
 	if !firstSnapshot.OperatorHint.ShouldAct {
 		t.Fatalf("expected operator hint to request manual action")
+	}
+	if !firstSnapshot.LastAutoPulse.ShouldSend {
+		t.Fatalf("expected auto pulse command to be prepared")
 	}
 
 	secondSnapshot, secondError := tracker.AnalyzeFrame(secondLiveFrame)
@@ -67,5 +81,28 @@ func TestLiveTrackerFrameBeforeStartReturnsError(t *testing.T) {
 	}
 	if snapshot.ProcessedFrames != 0 {
 		t.Fatalf("expected processed frames to stay zero, got %d", snapshot.ProcessedFrames)
+	}
+}
+
+func TestLiveTrackerAutoPulseConfigKeepsDefaultCapWhenRequestIsZero(t *testing.T) {
+	tracker := StartLiveTracker()
+	baseStars := []vector2{{x: 24, y: 26}, {x: 63, y: 43}, {x: 98, y: 70}}
+	referenceFrame := buildSyntheticGuideFrame(120, 100, baseStars, vector2{x: 0, y: 0}, 0)
+
+	_, startError := tracker.StartSession(LiveTrackerSessionConfig{
+		ReferenceFrame: referenceFrame,
+		MaxStars:       20,
+		PixelToMotor:   PixelToMotorMatrix{A: 40, D: 40},
+	})
+	if startError != nil {
+		t.Fatalf("expected start success, got %v", startError)
+	}
+
+	snapshot, configError := tracker.SetAutoPulseConfig(AutoPulseConfig{Enabled: true, MaxPulseMs: 0})
+	if configError != nil {
+		t.Fatalf("expected auto pulse config success, got %v", configError)
+	}
+	if snapshot.AutoPulseConfig.MaxPulseMs != defaultAutoPulseMaxMs {
+		t.Fatalf("expected default auto pulse cap %d, got %d", defaultAutoPulseMaxMs, snapshot.AutoPulseConfig.MaxPulseMs)
 	}
 }

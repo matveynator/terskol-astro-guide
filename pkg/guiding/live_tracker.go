@@ -18,6 +18,8 @@ type LiveTrackerSnapshot struct {
 	FailedFrames     int                    `json:"failed_frames"`
 	LastResult       FrameSeriesPoint       `json:"last_result"`
 	OperatorHint     ManualCorrectionAdvice `json:"operator_hint"`
+	AutoPulseConfig  AutoPulseConfig        `json:"auto_pulse_config"`
+	LastAutoPulse    AutoPulseCommand       `json:"last_auto_pulse"`
 }
 
 type LiveTrackerSessionConfig struct {
@@ -27,10 +29,11 @@ type LiveTrackerSessionConfig struct {
 }
 
 type liveTrackerCommand struct {
-	kind   string
-	config LiveTrackerSessionConfig
-	frame  image.Image
-	reply  chan liveTrackerReply
+	kind            string
+	config          LiveTrackerSessionConfig
+	frame           image.Image
+	autoPulseConfig AutoPulseConfig
+	reply           chan liveTrackerReply
 }
 
 type liveTrackerReply struct {
@@ -48,6 +51,23 @@ type liveTrackerState struct {
 	failedFrames     int
 	lastResult       FrameSeriesPoint
 	operatorHint     ManualCorrectionAdvice
+	autoPulseConfig  AutoPulseConfig
+	lastAutoPulse    AutoPulseCommand
+}
+
+type AutoPulseConfig struct {
+	Enabled    bool `json:"enabled"`
+	MaxPulseMs int  `json:"max_pulse_ms"`
+}
+
+type AutoPulseCommand struct {
+	ShouldSend      bool   `json:"should_send"`
+	AxisXDirection  string `json:"axis_x_direction"`
+	AxisXPulseMs    int    `json:"axis_x_pulse_ms"`
+	AxisYDirection  string `json:"axis_y_direction"`
+	AxisYPulseMs    int    `json:"axis_y_pulse_ms"`
+	Reason          string `json:"reason"`
+	DispatchMessage string `json:"dispatch_message"`
 }
 
 // StartLiveTracker creates a goroutine-owned session tracker for step-3 live frame analysis.
@@ -79,6 +99,13 @@ func (tracker *LiveTracker) Snapshot() LiveTrackerSnapshot {
 	return response.snapshot
 }
 
+func (tracker *LiveTracker) SetAutoPulseConfig(config AutoPulseConfig) (LiveTrackerSnapshot, error) {
+	reply := make(chan liveTrackerReply, 1)
+	tracker.commands <- liveTrackerCommand{kind: "set_auto_config", autoPulseConfig: config, reply: reply}
+	response := <-reply
+	return response.snapshot, response.err
+}
+
 func runLiveTrackerLoop(commands <-chan liveTrackerCommand) {
 	state := liveTrackerState{}
 	for command := range commands {
@@ -97,6 +124,12 @@ func runLiveTrackerLoop(commands <-chan liveTrackerCommand) {
 			command.reply <- liveTrackerReply{snapshot: buildLiveTrackerSnapshot(state), err: frameError}
 		case "snapshot":
 			command.reply <- liveTrackerReply{snapshot: buildLiveTrackerSnapshot(state), err: nil}
+		case "set_auto_config":
+			nextState, setConfigError := setLiveTrackerAutoPulseConfig(state, command.autoPulseConfig)
+			if setConfigError == nil {
+				state = nextState
+			}
+			command.reply <- liveTrackerReply{snapshot: buildLiveTrackerSnapshot(state), err: setConfigError}
 		default:
 			command.reply <- liveTrackerReply{snapshot: buildLiveTrackerSnapshot(state), err: errors.New("unknown tracker command")}
 		}
@@ -122,6 +155,11 @@ func startLiveTrackerSession(currentState liveTrackerState, config LiveTrackerSe
 		failedFrames:     0,
 		lastResult:       FrameSeriesPoint{},
 		operatorHint:     ManualCorrectionAdvice{},
+		autoPulseConfig: AutoPulseConfig{
+			Enabled:    false,
+			MaxPulseMs: defaultAutoPulseMaxMs,
+		},
+		lastAutoPulse: AutoPulseCommand{},
 	}, nil
 }
 
@@ -147,6 +185,11 @@ func analyzeLiveTrackerFrame(currentState liveTrackerState, frame image.Image) (
 			ShouldAct: false,
 			Summary:   "Frame solve failed. Wait for the next frame before manual correction.",
 		}
+		nextState.lastAutoPulse = AutoPulseCommand{
+			ShouldSend:      false,
+			Reason:          "frame_solve_failed",
+			DispatchMessage: "Auto pulse skipped: frame solve failed.",
+		}
 		return nextState, shiftError
 	}
 
@@ -168,7 +211,47 @@ func analyzeLiveTrackerFrame(currentState liveTrackerState, frame image.Image) (
 		shiftResult.SuggestedMotor.MotorXMs,
 		shiftResult.SuggestedMotor.MotorYMs,
 	)
+	nextState.lastAutoPulse = buildAutoPulseCommand(nextState.operatorHint, nextState.autoPulseConfig)
 	return nextState, nil
+}
+
+const defaultAutoPulseMaxMs = 120
+
+func setLiveTrackerAutoPulseConfig(currentState liveTrackerState, config AutoPulseConfig) (liveTrackerState, error) {
+	nextState := currentState
+	nextState.autoPulseConfig.Enabled = config.Enabled
+	if config.MaxPulseMs <= 0 {
+		nextState.autoPulseConfig.MaxPulseMs = defaultAutoPulseMaxMs
+	} else {
+		nextState.autoPulseConfig.MaxPulseMs = clampInt(config.MaxPulseMs, defaultManualHintMinimumPulseMs, defaultManualHintMaximumPulseMs)
+	}
+	nextState.lastAutoPulse = buildAutoPulseCommand(nextState.operatorHint, nextState.autoPulseConfig)
+	return nextState, nil
+}
+
+func buildAutoPulseCommand(operatorHint ManualCorrectionAdvice, config AutoPulseConfig) AutoPulseCommand {
+	if !config.Enabled {
+		return AutoPulseCommand{ShouldSend: false, Reason: "auto_disabled", DispatchMessage: "Auto pulse is disabled."}
+	}
+	if !operatorHint.ShouldAct {
+		return AutoPulseCommand{ShouldSend: false, Reason: "deadband", DispatchMessage: "Auto pulse skipped: drift inside deadband."}
+	}
+
+	limitedXPulse := clampInt(operatorHint.AxisXPulseMs, 0, config.MaxPulseMs)
+	limitedYPulse := clampInt(operatorHint.AxisYPulseMs, 0, config.MaxPulseMs)
+	if limitedXPulse == 0 && limitedYPulse == 0 {
+		return AutoPulseCommand{ShouldSend: false, Reason: "below_threshold", DispatchMessage: "Auto pulse skipped: command below minimum threshold."}
+	}
+
+	return AutoPulseCommand{
+		ShouldSend:      true,
+		AxisXDirection:  operatorHint.AxisXDirection,
+		AxisXPulseMs:    limitedXPulse,
+		AxisYDirection:  operatorHint.AxisYDirection,
+		AxisYPulseMs:    limitedYPulse,
+		Reason:          "ready",
+		DispatchMessage: buildManualHintSummary(operatorHint.AxisXDirection, limitedXPulse, operatorHint.AxisYDirection, limitedYPulse),
+	}
 }
 
 func buildLiveTrackerSnapshot(state liveTrackerState) LiveTrackerSnapshot {
@@ -188,5 +271,7 @@ func buildLiveTrackerSnapshot(state liveTrackerState) LiveTrackerSnapshot {
 		FailedFrames:     state.failedFrames,
 		LastResult:       state.lastResult,
 		OperatorHint:     state.operatorHint,
+		AutoPulseConfig:  state.autoPulseConfig,
+		LastAutoPulse:    state.lastAutoPulse,
 	}
 }

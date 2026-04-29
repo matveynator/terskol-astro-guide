@@ -83,3 +83,29 @@ func TestAnalyzeFrameShiftReturnsErrorWhenTooFewStars(t *testing.T) {
 		t.Fatalf("expected error when insufficient stars are available")
 	}
 }
+
+func TestAnalyzeFrameShiftUsesDefaultStarLimitWhenRequestIsZero(t *testing.T) {
+	referenceFrame := image.NewRGBA(image.Rect(0, 0, 260, 200))
+	currentFrame := image.NewRGBA(image.Rect(0, 0, 260, 200))
+	fillFrame(referenceFrame, color.RGBA{R: 3, G: 3, B: 3, A: 255})
+	fillFrame(currentFrame, color.RGBA{R: 3, G: 3, B: 3, A: 255})
+
+	for starIndex := 0; starIndex < 12; starIndex += 1 {
+		x := 20 + (starIndex * 18)
+		y := 28 + (starIndex * 11 % 130)
+		placeStar(referenceFrame, x, y, 245)
+		placeStar(currentFrame, x+3, y-2, 245)
+	}
+
+	result, err := AnalyzeFrameShift(FrameShiftRequest{
+		ReferenceFrame: referenceFrame,
+		CurrentFrame:   currentFrame,
+		MaxStars:       0,
+	})
+	if err != nil {
+		t.Fatalf("expected successful solve with default star limit, got %v", err)
+	}
+	if len(result.ReferenceGuideStars) < 8 {
+		t.Fatalf("expected default star limit path to keep enough stars, got %d", len(result.ReferenceGuideStars))
+	}
+}

@@ -131,6 +131,21 @@ type guidingLiveFrameRequest struct {
 	ImageData string `json:"image_data"`
 }
 
+type guidingLiveAutoPulseRequest struct {
+	Enabled    bool `json:"enabled"`
+	MaxPulseMs int  `json:"max_pulse_ms"`
+}
+
+type guidingFrameShiftRequest struct {
+	ReferenceImageData string  `json:"reference_image_data"`
+	CurrentImageData   string  `json:"current_image_data"`
+	MaxStars           int     `json:"max_stars"`
+	MatrixA            float64 `json:"matrix_a"`
+	MatrixB            float64 `json:"matrix_b"`
+	MatrixC            float64 `json:"matrix_c"`
+	MatrixD            float64 `json:"matrix_d"`
+}
+
 type guidingNativeFileResponse struct {
 	FileName string `json:"file_name"`
 	DataURL  string `json:"data_url"`
@@ -276,6 +291,8 @@ func main() {
 	http.HandleFunc("/api/guiding/live/start", handleGuidingLiveStart(liveGuidingTracker))
 	http.HandleFunc("/api/guiding/live/frame", handleGuidingLiveFrame(liveGuidingTracker))
 	http.HandleFunc("/api/guiding/live/state", handleGuidingLiveState(liveGuidingTracker))
+	http.HandleFunc("/api/guiding/live/auto-pulse", handleGuidingLiveAutoPulse(liveGuidingTracker))
+	http.HandleFunc("/api/guiding/frame-shift", handleGuidingFrameShift)
 	http.HandleFunc("/api/guiding/native-open-image", handleGuidingNativeImageOpen)
 	http.HandleFunc("/", handleRequest)
 
@@ -1655,6 +1672,75 @@ func handleGuidingLiveState(liveTracker *guiding.LiveTracker) http.HandlerFunc {
 
 		writeJSON(writer, liveTracker.Snapshot())
 	}
+}
+
+func handleGuidingLiveAutoPulse(liveTracker *guiding.LiveTracker) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			writeJSONError(writer, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		var autoPulseRequest guidingLiveAutoPulseRequest
+		if err := json.NewDecoder(request.Body).Decode(&autoPulseRequest); err != nil {
+			writeJSONError(writer, http.StatusBadRequest, "invalid auto-pulse payload")
+			return
+		}
+
+		snapshot, err := liveTracker.SetAutoPulseConfig(guiding.AutoPulseConfig{
+			Enabled:    autoPulseRequest.Enabled,
+			MaxPulseMs: autoPulseRequest.MaxPulseMs,
+		})
+		if err != nil {
+			writeJSONError(writer, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		writeJSON(writer, snapshot)
+	}
+}
+
+func handleGuidingFrameShift(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		writeJSONError(writer, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var frameShiftRequest guidingFrameShiftRequest
+	if err := json.NewDecoder(request.Body).Decode(&frameShiftRequest); err != nil {
+		writeJSONError(writer, http.StatusBadRequest, "invalid frame-shift payload")
+		return
+	}
+
+	referenceFrame, err := decodeFrameFromBase64ImagePayload(frameShiftRequest.ReferenceImageData)
+	if err != nil {
+		writeJSONError(writer, http.StatusBadRequest, "invalid reference image payload")
+		return
+	}
+
+	currentFrame, err := decodeFrameFromBase64ImagePayload(frameShiftRequest.CurrentImageData)
+	if err != nil {
+		writeJSONError(writer, http.StatusBadRequest, "invalid current image payload")
+		return
+	}
+
+	frameShiftResult, err := guiding.AnalyzeFrameShift(guiding.FrameShiftRequest{
+		ReferenceFrame: referenceFrame,
+		CurrentFrame:   currentFrame,
+		MaxStars:       frameShiftRequest.MaxStars,
+		PixelToMotor: guiding.PixelToMotorMatrix{
+			A: frameShiftRequest.MatrixA,
+			B: frameShiftRequest.MatrixB,
+			C: frameShiftRequest.MatrixC,
+			D: frameShiftRequest.MatrixD,
+		},
+	})
+	if err != nil {
+		writeJSONError(writer, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(writer, frameShiftResult)
 }
 
 func handleGuidingCatalogSearch(writer http.ResponseWriter, request *http.Request) {
